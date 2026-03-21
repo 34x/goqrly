@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>goqrly</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
+        h1 a { text-decoration: none; color: inherit; }
+        img { border: 1px solid #ddd; margin: 30px 0; max-width: 100%; height: auto; }
+        .text { font-size: 14px; color: #666; word-break: break-all; margin-bottom: 10px; }
+        .code { font-size: 12px; color: #999; margin-bottom: 20px; }
+        a { color: #007bff; }
+        form { margin-top: 30px; }
+        input { width: 100%; padding: 12px; font-size: 16px; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; font-size: 16px; margin-top: 10px; background: #007bff; color: white; border: none; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .github-link { position: fixed; top: 20px; right: 20px; }
+    </style>
+</head>
+<body>
+    <a href="https://github.com/34x/goqrly" class="github-link" target="_blank" rel="noopener">
+        <svg height="32" viewBox="0 0 16 16" width="32" fill="currentColor">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+        </svg>
+    </a>
+    <h1><a href="/">goqrly</a></h1>
+    <img src="/qr/{{.Key}}" alt="QR Code">
+    <div class="text">{{.Text}}</div>
+    <div class="code">/{{.Key}}</div>
+    <p><a href="/">Generate another</a></p>
+    <form action="/generate" method="POST">
+        <input type="text" name="text" value="{{.Text}}">
+        <button type="submit">Regenerate</button>
+    </form>
+</body>
+</html>

@@ -1,0 +1,27 @@
+# Binary
+goqrly
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+goqrly_test
+
+# Go
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output
+*.tar.gz
+*.zip
