@@ -15,4 +15,4 @@ esac
 curl -sSL "https://github.com/34x/goqrly/releases/latest/download/goqrly_linux_${ARCH}.tar.gz" | tar -xz
 mv goqrly_linux_${ARCH} goqrly
 chmod +x goqrly
-sudo ./goqrly install --port 80
+sudo ./goqrly install

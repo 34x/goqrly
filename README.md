@@ -2,39 +2,41 @@
 
 Single-binary QR code generator with web UI. Zero dependencies.
 
-## Quick Setup (one-liner, uses port 80)
+## Quick Setup (one-liner)
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/34x/goqrly/main/setup.sh | sudo bash
 ```
 
-This downloads the latest binary, installs it as a systemd service on port 80, and opens the firewall.
+This downloads the latest binary, installs it as a systemd service with TLS on port 443, and opens the firewall.
 
 ## Install Command
 
-Running `sudo ./goqrly install --port 8080` will:
+Running `sudo ./goqrly install` will:
 
-1. Copy binary to `/usr/local/bin/goqrly`
-2. Create systemd service at `/etc/systemd/system/goqrly.service`
-3. Enable and start the service
-4. Open firewall port (ufw or firewalld)
-5. Detect public IP and print access URLs
+1. Generate self-signed TLS certificates
+2. Copy binary to `/usr/local/bin/goqrly`
+3. Create systemd service at `/etc/systemd/system/goqrly.service`
+4. Enable and start the service
+5. Open firewall port (ufw or firewalld)
+6. Detect public IP and print access URLs
+
+**Default: port 443 with TLS.** Use `--port 8080` (without `--tls`) to install without TLS.
 
 ## Quick Start
 
 ```bash
-# Download binary (replace VERSION and ARCH as needed)
-curl -L https://github.com/34x/goqrly/releases/latest/download/goqrly_linux_amd64.tar.gz -o goqrly.tar.gz && tar -xzvf goqrly.tar.gz && mv goqrly_linux_amd64 goqrly && chmod +x ./goqrly && ./goqrly install --port 80
-```
+# Download binary
+curl -L https://github.com/34x/goqrly/releases/latest/download/goqrly_linux_amd64.tar.gz -o goqrly.tar.gz && tar -xzvf goqrly.tar.gz && mv goqrly_linux_amd64 goqrly && chmod +x ./goqrly
 
-That's it. Access at `http://YOUR_IP:80`
-
-## Manual Usage without installation as a system service
-
-```bash
 # Run directly
-./goqrly                      # default port 8080
-./goqrly --port 9000          # custom port
+./goqrly                      # http on port 8080
+./goqrly --port 9000          # http on custom port
+./goqrly --tls                # https on port 443 (self-signed)
+
+# Install as service
+sudo ./goqrly install         # TLS on port 443 (default)
+sudo ./goqrly install --port 8080  # No TLS on port 8080
 ```
 
 ## Features
@@ -47,6 +49,26 @@ That's it. Access at `http://YOUR_IP:80`
 - **Case-insensitive** — `/abc` = `/ABC`
 - **Systemd service** — Auto-restarts on failure
 - **Firewall** — Auto-opens port (ufw/firewalld)
+- **TLS support** — Self-signed certificates (auto-generated on install)
+
+## TLS Certificates
+
+Certificates are auto-generated on install and stored at:
+- `/etc/goqrly/goqrly.crt`
+- `/etc/goqrly/goqrly.key`
+
+**Runtime with self-signed cert:**
+```bash
+./goqrly --tls  # Uses in-memory cert, port 443
+```
+
+**Provide your own certificates:**
+```bash
+./goqrly --cert /path/to/cert.pem --key /path/to/key.pem
+sudo ./goqrly install --cert /path/to/cert.pem --key /path/to/key.pem
+```
+
+Note: Browsers will show a "not secure" warning for self-signed certificates. For production use, consider Let's Encrypt.
 
 ## Manual Installation
 
@@ -56,7 +78,7 @@ Without `install` command:
 # Copy binary
 sudo cp goqrly /usr/local/bin/
 
-# Create service
+# Create service (edit ExecStart as needed)
 sudo tee /etc/systemd/system/goqrly.service <<EOF
 [Unit]
 Description=goqrly QR Code Generator
@@ -64,7 +86,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/goqrly
+ExecStart=/usr/local/bin/goqrly --port 8080
 Restart=always
 
 [Install]
@@ -82,7 +104,7 @@ sudo ufw allow 8080/tcp
 ## Build from Source
 
 ```bash
-git clone https://github.com/YOUR_USER/goqrly.git
+git clone https://github.com/34x/goqrly.git
 cd goqrly
 go build -ldflags="-s -w" -o goqrly .
 ```

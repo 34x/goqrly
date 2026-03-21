@@ -2,10 +2,19 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"embed"
+	"encoding/pem"
 	"fmt"
 	"html/template"
 	"io"
+	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -21,26 +30,56 @@ var store = NewStore()
 var recentCodes []string
 var recentMax = 12
 var serverPort = 8080
+var defaultPort = 8080
+
+// TLS settings
+var tlsEnabled = false
+var certFile = ""
+var keyFile = ""
+var forceOverwrite = false
 
 var indexTmpl = template.Must(template.ParseFS(staticFS, "static/index.html"))
 var viewTmpl = template.Must(template.ParseFS(staticFS, "static/view.html"))
+
+const certDir = "/etc/goqrly"
+const certFileName = "goqrly.crt"
+const keyFileName = "goqrly.key"
 
 func main() {
 	args := os.Args[1:]
 
 	// Parse global flags
-	if len(args) > 0 {
-		for i, arg := range args {
-			if arg == "--port" && i+1 < len(args) {
+	for i, arg := range args {
+		switch arg {
+		case "--port":
+			if i+1 < len(args) {
 				if p, err := strconv.Atoi(args[i+1]); err == nil {
 					serverPort = p
 				}
 			}
-			if arg == "--recent" && i+1 < len(args) {
+		case "--recent":
+			if i+1 < len(args) {
 				if n, err := strconv.Atoi(args[i+1]); err == nil && n > 0 {
 					recentMax = n
 				}
 			}
+		case "--tls":
+			tlsEnabled = true
+			if serverPort == 8080 && !hasExplicitPort(args) {
+				serverPort = 443
+			} else if serverPort == 8443 && !hasExplicitPort(args) {
+				serverPort = 443
+			}
+		case "--cert":
+			if i+1 < len(args) {
+				certFile = args[i+1]
+			}
+		case "--key":
+			if i+1 < len(args) {
+				keyFile = args[i+1]
+			}
+		case "--force":
+			forceOverwrite = true
 		}
 	}
 
@@ -50,15 +89,18 @@ func main() {
 			printHelp()
 			return
 		case "install":
-			if serverPort == 8080 && !hasExplicitPort(args) {
-				fmt.Fprintln(os.Stderr, "Error: --port is required for install")
-				fmt.Fprintln(os.Stderr, "Usage: sudo goqrly install --port 8080")
-				os.Exit(1)
+			// Install defaults to port 443 with TLS
+			if serverPort == 8080 {
+				serverPort = 443
+				tlsEnabled = true
 			}
 			installService()
 			return
 		}
 	}
+
+	// Determine if we need TLS
+	useTLS := tlsEnabled || (certFile != "" && keyFile != "")
 
 	setupFirewall(serverPort)
 
@@ -69,10 +111,41 @@ func main() {
 	mux.HandleFunc("/{key}", handleView)
 
 	addr := fmt.Sprintf(":%d", serverPort)
-	fmt.Printf("goqrly running on http://0.0.0.0:%d\n", serverPort)
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+
+	if useTLS && certFile != "" && keyFile != "" {
+		fmt.Printf("goqrly running on https://0.0.0.0:%d\n", serverPort)
+		if err := http.ListenAndServeTLS(addr, certFile, keyFile, mux); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	} else if useTLS {
+		// Generate in-memory cert
+		certPEM, keyPEM, err := generateSelfSignedCert()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error generating certificate: %v\n", err)
+			os.Exit(1)
+		}
+		cert, err := tls.X509KeyPair([]byte(certPEM), []byte(keyPEM))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading certificate: %v\n", err)
+			os.Exit(1)
+		}
+		tlsConfig := &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			Certificates: []tls.Certificate{cert},
+		}
+		fmt.Printf("goqrly running on https://0.0.0.0:%d (self-signed cert)\n", serverPort)
+		server := &http.Server{Addr: addr, TLSConfig: tlsConfig, Handler: mux}
+		if err := server.ListenAndServeTLS("", ""); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		fmt.Printf("goqrly running on http://0.0.0.0:%d\n", serverPort)
+		if err := http.ListenAndServe(addr, mux); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 	}
 }
 
@@ -96,11 +169,16 @@ Options:
   -h, --help     Show this help message
   --port <n>     Port to listen on (default: 8080)
   --recent <n>   Number of recent codes on index page (default: 12)
+  --tls          Enable TLS with self-signed certificate
+  --cert <path>  Path to TLS certificate
+  --key <path>   Path to TLS private key
 
 Examples:
   goqrly                              # Run on port 8080
-  goqrly --port 9000                 # Run on port 9000
-  sudo goqrly install --port 8080    # Install as service`)
+  goqrly --port 9000                  # Run on port 9000
+  goqrly --tls                        # Run on port 443 with self-signed cert
+  sudo goqrly install                 # Install with TLS on port 443 (default)
+  sudo goqrly install --port 8080     # Install without TLS on port 8080`)
 }
 
 func setupFirewall(port int) {
@@ -115,6 +193,60 @@ func installService() {
 	if os.Getuid() != 0 {
 		fmt.Fprintln(os.Stderr, "Error: install must be run as root")
 		os.Exit(1)
+	}
+
+	// Determine TLS mode
+	useTLS := tlsEnabled || (certFile != "" && keyFile != "")
+	autoGenCerts := tlsEnabled && certFile == "" && keyFile == ""
+	useCertFile := certFile
+	useKeyFile := keyFile
+
+	// Auto-enable TLS for ports 443 and 8443
+	if !useTLS && (serverPort == 443 || serverPort == 8443) {
+		useTLS = true
+		autoGenCerts = true
+	}
+
+	// Generate certs if needed
+	if autoGenCerts {
+		certPath := certDir + "/" + certFileName
+		keyPath := certDir + "/" + keyFileName
+
+		// Check if certs already exist
+		if _, err := os.Stat(certPath); err == nil {
+			if !forceOverwrite {
+				fmt.Fprintf(os.Stderr, "Error: certificates already exist at %s\n", certPath)
+				fmt.Fprintln(os.Stderr, "Use --force to overwrite, or --cert and --key to specify different certificates")
+				os.Exit(1)
+			}
+		}
+
+		// Generate new certificates
+		certPEM, keyPEM, err := generateSelfSignedCert()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error generating certificates: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Create directory
+		if err := os.MkdirAll(certDir, 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating certificate directory: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Write certificates
+		if err := os.WriteFile(certPath, []byte(certPEM), 0600); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing certificate: %v\n", err)
+			os.Exit(1)
+		}
+		if err := os.WriteFile(keyPath, []byte(keyPEM), 0600); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing key: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Generated TLS certificates at %s\n", certDir)
+		useCertFile = certPath
+		useKeyFile = keyPath
 	}
 
 	// Copy binary to path
@@ -145,15 +277,21 @@ func installService() {
 	// Detect public IP (1 second timeout)
 	ip := detectPublicIP()
 
-	// Write systemd service
+	// Build ExecStart line
 	portStr := strconv.Itoa(serverPort)
+	execStart := "/usr/local/bin/goqrly --port " + portStr
+	if useTLS {
+		execStart += " --cert " + useCertFile + " --key " + useKeyFile
+	}
+
+	// Write systemd service
 	service := `[Unit]
 Description=goqrly QR Code Generator
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/goqrly --port ` + portStr + `
+ExecStart=` + execStart + `
 Restart=always
 RestartSec=5
 
@@ -176,14 +314,73 @@ WantedBy=multi-user.target
 	openFirewall(serverPort)
 
 	// Print result
+	proto := "http"
+	if useTLS {
+		proto = "https"
+	}
 	fmt.Println("goqrly installed successfully!")
 	fmt.Println()
-	fmt.Println("Access locally: http://localhost:" + strconv.Itoa(serverPort))
+	fmt.Println("Access locally: " + proto + "://localhost:" + portStr)
 	if ip != "" {
-		fmt.Println("Access remote:  http://" + ip + ":" + strconv.Itoa(serverPort))
+		fmt.Println("Access remote:  " + proto + "://" + ip + ":" + portStr)
 	}
 	fmt.Println()
 	fmt.Println("Manage service: sudo systemctl status goqrly")
+}
+
+func generateSelfSignedCert() (certPEM, keyPEM string, err error) {
+	// Generate private key
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to generate private key: %w", err)
+	}
+
+	// Create certificate template
+	template := x509.Certificate{
+		SerialNumber: newSerialNumber(),
+		Subject: pkix.Name{
+			CommonName:   "goqrly",
+			Organization: []string{"goqrly"},
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(10 * 365 * 24 * time.Hour), // 10 years
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IPAddresses:           []net.IP{net.ParseIP("0.0.0.0"), net.ParseIP("127.0.0.1")},
+		DNSNames:              []string{"localhost"},
+	}
+
+	// Create certificate
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create certificate: %w", err)
+	}
+
+	// Encode to PEM
+	certBlock := &pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: certDER,
+	}
+	certPEM = string(pem.EncodeToMemory(certBlock))
+
+	// Encode private key to PEM
+	keyBytes, err := x509.MarshalECPrivateKey(privateKey)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal private key: %w", err)
+	}
+	keyBlock := &pem.Block{
+		Type:  "EC PRIVATE KEY",
+		Bytes: keyBytes,
+	}
+	keyPEM = string(pem.EncodeToMemory(keyBlock))
+
+	return certPEM, keyPEM, nil
+}
+
+func newSerialNumber() *big.Int {
+	serial, _ := rand.Prime(rand.Reader, 16)
+	return serial
 }
 
 func detectPublicIP() string {
