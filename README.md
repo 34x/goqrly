@@ -2,6 +2,18 @@
 
 Share QR codes with friends over the internet. No accounts, no cloud, no tracking — just self-hosted simplicity.
 
+## Features
+
+**Generate QR codes in seconds** — Paste a link, text, or anything. Get a QR code and short link instantly. Put it on a poster, in a presentation, wherever.
+
+**Share sensitive stuff easily** — WiFi passwords, credentials, private links. Protect with password or authenticator app. Share link and access separately.
+
+**No accounts, no tracking** — Self-hosted, no cookies, no cloud. Your data stays with you.
+
+**TLS built-in** — HTTPS ready out of the box with self-signed certificates.
+
+**Single binary** — Zero dependencies.
+
 ## Quick Setup (one-liner)
 
 ```bash
@@ -42,33 +54,34 @@ curl -L https://github.com/34x/goqrly/releases/latest/download/goqrly_linux_amd6
 ./goqrly                      # http on port 8080
 ./goqrly --port 9000          # http on custom port
 ./goqrly --tls                # https on port 443 (self-signed)
+./goqrly --list-recent-public # Show recent public entries on homepage
 
 # Install as service
 sudo ./goqrly install         # TLS on port 443 (default)
 sudo ./goqrly install --port 8080  # No TLS on port 8080
 ```
 
-## Features
+## Protection Options
 
-- **Single binary** — No dependencies, no runtime needed
-- **Web UI** — Simple form to generate QR codes
-- **Short codes** — 3-6 character deterministic keys
-- **Recent list** — Last 12 codes shown on homepage
-- **Password protection** — Optional per-QR password
-- **Auto-scale** — Collision-safe, shortest available code
-- **Case-insensitive** — `/abc` = `/ABC`
-- **Systemd service** — Auto-restarts on failure
-- **Firewall** — Auto-opens port (ufw/firewalld)
-- **TLS support** — Self-signed certificates (auto-generated on install)
+When generating a QR code, choose protection level:
 
-## Password Protection
+**No protection** — Anyone with the link can view.
 
-When generating a QR code, optionally add a password. Protected QR codes require the password to view.
+**Password** — Viewers need a password to unlock.
+
+**TOTP** — For group sharing:
+1. Creator generates QR with TOTP option
+2. Scan the setup QR with an authenticator app (FreeOTP, Google Auth, Authy, etc.)
+3. Enter the 6-digit code to verify and create the entry
+4. Share the short link with the group
+5. Group members use their authenticator apps to get the current code and unlock
 
 ```
-[Enter text or URL]
-[Password (optional)]
-                      [Generate]
+┌─────────────────────────────────────┐
+│  Password    │  TOTP               │
+│  [________]  │  [ ]                │
+└─────────────────────────────────────┘
+              [Generate]
 ```
 
 ## TLS Certificates
@@ -89,6 +102,19 @@ sudo ./goqrly install --cert /path/to/cert.pem --key /path/to/key.pem
 ```
 
 Note: Browsers will show a "not secure" warning for self-signed certificates. For production use, consider Let's Encrypt.
+
+## Command Line Options
+
+```
+-h, --help               Show this help message
+--port <n>               Port to listen on (default: 8080)
+--recent <n>             Number of recent codes on index page (default: 12)
+--list-recent-public     Show recent public entries on index page
+--tls                    Enable TLS with self-signed certificate
+--cert <path>            Path to TLS certificate
+--key <path>             Path to TLS private key
+--remove-binary          Remove binary when uninstalling
+```
 
 ## Manual Installation
 
@@ -127,6 +153,13 @@ sudo ufw allow 8080/tcp
 git clone https://github.com/34x/goqrly.git
 cd goqrly
 go build -ldflags="-s -w" -o goqrly .
+```
+
+## Tests
+
+```bash
+go test       # Unit tests
+./test.sh     # Integration tests
 ```
 
 ## License
