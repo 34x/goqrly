@@ -1,12 +1,20 @@
 package main
 
 import (
+	"encoding/base64"
 	"net/http"
 )
 
 type ViewData struct {
-	Key  string
-	Text string
+	Key           string
+	Text          string
+	QRBase64      string
+	WrongPassword bool
+}
+
+type LockData struct {
+	Key           string
+	WrongPassword bool
 }
 
 type IndexData struct {
@@ -14,8 +22,9 @@ type IndexData struct {
 }
 
 type RecentItem struct {
-	Key  string
-	Text string
+	Key      string
+	Text     string
+	QRBase64 string
 }
 
 func handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -28,12 +37,13 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	for i := len(recentCodes) - 1; i >= 0 && len(recent) < recentMax; i-- {
 		key := recentCodes[i]
 		entry := store.Get(key)
-		if entry != nil {
+		if entry != nil && !entry.Protected {
 			text := entry.Text
 			if len(text) > 50 {
 				text = text[:47] + "..."
 			}
-			recent = append(recent, RecentItem{Key: key, Text: text})
+			qrBase64 := base64.StdEncoding.EncodeToString(entry.QR)
+			recent = append(recent, RecentItem{Key: key, Text: text, QRBase64: qrBase64})
 		}
 	}
 
@@ -55,7 +65,9 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	key, _ := GenerateShortcode(text)
+	password := r.FormValue("password")
+
+	key, _ := GenerateShortcode(text, password)
 
 	recentCodes = append(recentCodes, key)
 	if len(recentCodes) > 100 {
@@ -72,6 +84,13 @@ func handleQR(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+
+	// If password protected, redirect to view page for unlock
+	if entry.Protected {
+		http.Redirect(w, r, "/"+key, http.StatusFound)
+		return
+	}
+
 	w.Header().Set("Content-Type", "image/png")
 	w.Write(entry.QR)
 }
@@ -83,5 +102,29 @@ func handleView(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
-	viewTmpl.Execute(w, ViewData{Key: key, Text: entry.Text})
+
+	// Handle unlock POST
+	if r.Method == http.MethodPost {
+		r.ParseForm()
+		password := r.FormValue("password")
+		if hashPassword(password) == entry.Password {
+			// Password correct - show QR
+			qrBase64 := base64.StdEncoding.EncodeToString(entry.QR)
+			viewTmpl.Execute(w, ViewData{Key: key, Text: entry.Text, QRBase64: qrBase64})
+			return
+		}
+		// Wrong password - show lock form
+		lockTmpl.Execute(w, LockData{Key: key, WrongPassword: true})
+		return
+	}
+
+	// If password protected, show lock form
+	if entry.Protected {
+		lockTmpl.Execute(w, LockData{Key: key})
+		return
+	}
+
+	// No password - show QR directly
+	qrBase64 := base64.StdEncoding.EncodeToString(entry.QR)
+	viewTmpl.Execute(w, ViewData{Key: key, Text: entry.Text, QRBase64: qrBase64})
 }

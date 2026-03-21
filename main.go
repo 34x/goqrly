@@ -41,6 +41,7 @@ var removeBinary = false
 
 var indexTmpl = template.Must(template.ParseFS(staticFS, "static/index.html"))
 var viewTmpl = template.Must(template.ParseFS(staticFS, "static/view.html"))
+var lockTmpl = template.Must(template.ParseFS(staticFS, "static/lock.html"))
 
 const certDir = "/etc/goqrly"
 const certFileName = "goqrly.crt"
@@ -116,8 +117,8 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleIndex)
 	mux.HandleFunc("/generate", handleGenerate)
-	mux.HandleFunc("/qr/{key}", handleQR)
 	mux.HandleFunc("/{key}", handleView)
+	mux.HandleFunc("/qr/{key}", handleQR)
 
 	addr := fmt.Sprintf(":%d", serverPort)
 

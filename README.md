@@ -1,6 +1,6 @@
 # goqrly
 
-Single-binary QR code generator with web UI. Zero dependencies.
+Share QR codes with friends over the internet. No accounts, no cloud, no tracking — just self-hosted simplicity.
 
 ## Quick Setup (one-liner)
 
@@ -54,11 +54,22 @@ sudo ./goqrly install --port 8080  # No TLS on port 8080
 - **Web UI** — Simple form to generate QR codes
 - **Short codes** — 3-6 character deterministic keys
 - **Recent list** — Last 12 codes shown on homepage
+- **Password protection** — Optional per-QR password
 - **Auto-scale** — Collision-safe, shortest available code
 - **Case-insensitive** — `/abc` = `/ABC`
 - **Systemd service** — Auto-restarts on failure
 - **Firewall** — Auto-opens port (ufw/firewalld)
 - **TLS support** — Self-signed certificates (auto-generated on install)
+
+## Password Protection
+
+When generating a QR code, optionally add a password. Protected QR codes require the password to view.
+
+```
+[Enter text or URL]
+[Password (optional)]
+                      [Generate]
+```
 
 ## TLS Certificates
 

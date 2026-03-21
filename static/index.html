@@ -8,8 +8,11 @@
         body { font-family: system-ui, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
         h1 { text-align: center; }
         input { width: 100%; padding: 12px; font-size: 16px; box-sizing: border-box; }
+        input[type="password"] { margin-top: 8px; }
         button { width: 100%; padding: 12px; font-size: 16px; margin-top: 10px; background: #007bff; color: white; border: none; cursor: pointer; }
         button:hover { background: #0056b3; }
+        .password-toggle { display: flex; align-items: center; margin-top: 4px; }
+        .password-toggle label { font-size: 12px; color: #666; cursor: pointer; }
         .recent { margin-top: 40px; }
         .recent h2 { font-size: 18px; color: #333; margin-bottom: 20px; }
         .recent-item { margin-bottom: 30px; padding: 20px; background: #fafafa; border-radius: 8px; }
@@ -29,6 +32,7 @@
     <h1>goqrly</h1>
     <form action="/generate" method="POST">
         <input type="text" name="text" placeholder="Enter text or URL" autofocus required>
+        <input type="password" name="password" placeholder="Password (optional)">
         <button type="submit">Generate</button>
     </form>
 
@@ -38,7 +42,9 @@
         {{range .Recent}}
         <a href="/{{.Key}}">
             <div class="recent-item">
-                <img src="/qr/{{.Key}}" alt="">
+                {{if .QRBase64}}
+                <img src="data:image/png;base64,{{.QRBase64}}" alt="">
+                {{end}}
                 <div class="text">{{.Text}}</div>
                 <div class="code">/{{.Key}}</div>
             </div>
