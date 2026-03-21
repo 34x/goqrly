@@ -29,6 +29,7 @@ var staticFS embed.FS
 var store = NewStore()
 var recentCodes []string
 var recentMax = 12
+var listRecentPublic = false
 var serverPort = 8080
 var defaultPort = 8080
 
@@ -88,6 +89,8 @@ func main() {
 			forceOverwrite = true
 		case "--remove-binary":
 			removeBinary = true
+		case "--list-recent-public":
+			listRecentPublic = true
 		}
 	}
 
@@ -179,17 +182,19 @@ Usage:
   sudo goqrly uninstall    Uninstall service
 
 Options:
-  -h, --help          Show this help message
-  --port <n>          Port to listen on (default: 8080)
-  --recent <n>        Number of recent codes on index page (default: 12)
-  --tls               Enable TLS with self-signed certificate
-  --cert <path>       Path to TLS certificate
-  --key <path>        Path to TLS private key
-  --remove-binary     Remove binary when uninstalling
+  -h, --help               Show this help message
+  --port <n>               Port to listen on (default: 8080)
+  --recent <n>             Number of recent codes on index page (default: 12)
+  --list-recent-public     Show recent public entries on index page
+  --tls                    Enable TLS with self-signed certificate
+  --cert <path>            Path to TLS certificate
+  --key <path>             Path to TLS private key
+  --remove-binary          Remove binary when uninstalling
 
 Examples:
   goqrly                              # Run on port 8080
   goqrly --tls                        # Run on port 443 with self-signed cert
+  goqrly --list-recent-public         # Show recent public entries on homepage
   sudo goqrly install                 # Install with TLS on port 443 (default)
   sudo goqrly install --port 8080     # Install without TLS on port 8080
   sudo goqrly uninstall               # Remove service, keep certs and binary

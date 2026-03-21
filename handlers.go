@@ -30,7 +30,8 @@ type SetupTOTPData struct {
 }
 
 type IndexData struct {
-	Recent []RecentItem
+	Recent         []RecentItem
+	ShowRecentList bool
 }
 
 type RecentItem struct {
@@ -46,20 +47,22 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	recent := make([]RecentItem, 0, recentMax)
-	for i := len(recentCodes) - 1; i >= 0 && len(recent) < recentMax; i-- {
-		key := recentCodes[i]
-		entry := store.Get(key)
-		if entry != nil && !entry.Protected {
-			text := entry.Text
-			if len(text) > 50 {
-				text = text[:47] + "..."
+	if listRecentPublic {
+		for i := len(recentCodes) - 1; i >= 0 && len(recent) < recentMax; i-- {
+			key := recentCodes[i]
+			entry := store.Get(key)
+			if entry != nil && !entry.Protected {
+				text := entry.Text
+				if len(text) > 50 {
+					text = text[:47] + "..."
+				}
+				qrBase64 := base64.StdEncoding.EncodeToString(entry.QR)
+				recent = append(recent, RecentItem{Key: key, Text: text, QRBase64: qrBase64})
 			}
-			qrBase64 := base64.StdEncoding.EncodeToString(entry.QR)
-			recent = append(recent, RecentItem{Key: key, Text: text, QRBase64: qrBase64})
 		}
 	}
 
-	indexTmpl.Execute(w, IndexData{Recent: recent})
+	indexTmpl.Execute(w, IndexData{Recent: recent, ShowRecentList: listRecentPublic})
 }
 
 func handleGenerate(w http.ResponseWriter, r *http.Request) {
