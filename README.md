@@ -23,6 +23,15 @@ Running `sudo ./goqrly install` will:
 
 **Default: port 443 with TLS.** Use `--port 8080` (without `--tls`) to install without TLS.
 
+## Uninstall
+
+```bash
+sudo ./goqrly uninstall                # Remove service, keep certs and binary
+sudo ./goqrly uninstall --remove-binary  # Remove everything
+```
+
+Uninstall removes the systemd service and, if certificates were auto-generated, the `/etc/goqrly/` directory. Custom certificates (passed via `--cert`/`--key`) are never removed. Use `--remove-binary` to also remove the binary from `/usr/local/bin/goqrly`.
+
 ## Quick Start
 
 ```bash

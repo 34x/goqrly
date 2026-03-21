@@ -37,6 +37,7 @@ var tlsEnabled = false
 var certFile = ""
 var keyFile = ""
 var forceOverwrite = false
+var removeBinary = false
 
 var indexTmpl = template.Must(template.ParseFS(staticFS, "static/index.html"))
 var viewTmpl = template.Must(template.ParseFS(staticFS, "static/view.html"))
@@ -44,6 +45,9 @@ var viewTmpl = template.Must(template.ParseFS(staticFS, "static/view.html"))
 const certDir = "/etc/goqrly"
 const certFileName = "goqrly.crt"
 const keyFileName = "goqrly.key"
+const autoGenMarker = "auto-generated"
+const serviceFile = "/etc/systemd/system/goqrly.service"
+const binaryPath = "/usr/local/bin/goqrly"
 
 func main() {
 	args := os.Args[1:]
@@ -80,6 +84,8 @@ func main() {
 			}
 		case "--force":
 			forceOverwrite = true
+		case "--remove-binary":
+			removeBinary = true
 		}
 	}
 
@@ -95,6 +101,9 @@ func main() {
 				tlsEnabled = true
 			}
 			installService()
+			return
+		case "uninstall":
+			uninstallService()
 			return
 		}
 	}
@@ -163,22 +172,25 @@ func printHelp() {
 
 Usage:
   goqrly [options]          Run server
-  sudo goqrly install --port <n>   Install as service
+  sudo goqrly install       Install as service (TLS on port 443)
+  sudo goqrly uninstall    Uninstall service
 
 Options:
-  -h, --help     Show this help message
-  --port <n>     Port to listen on (default: 8080)
-  --recent <n>   Number of recent codes on index page (default: 12)
-  --tls          Enable TLS with self-signed certificate
-  --cert <path>  Path to TLS certificate
-  --key <path>   Path to TLS private key
+  -h, --help          Show this help message
+  --port <n>          Port to listen on (default: 8080)
+  --recent <n>        Number of recent codes on index page (default: 12)
+  --tls               Enable TLS with self-signed certificate
+  --cert <path>       Path to TLS certificate
+  --key <path>        Path to TLS private key
+  --remove-binary     Remove binary when uninstalling
 
 Examples:
   goqrly                              # Run on port 8080
-  goqrly --port 9000                  # Run on port 9000
   goqrly --tls                        # Run on port 443 with self-signed cert
   sudo goqrly install                 # Install with TLS on port 443 (default)
-  sudo goqrly install --port 8080     # Install without TLS on port 8080`)
+  sudo goqrly install --port 8080     # Install without TLS on port 8080
+  sudo goqrly uninstall               # Remove service, keep certs and binary
+  sudo goqrly uninstall --remove-binary  # Remove everything`)
 }
 
 func setupFirewall(port int) {
@@ -241,6 +253,12 @@ func installService() {
 		}
 		if err := os.WriteFile(keyPath, []byte(keyPEM), 0600); err != nil {
 			fmt.Fprintf(os.Stderr, "Error writing key: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Write marker file to indicate auto-generated certs
+		if err := os.WriteFile(certDir+"/"+autoGenMarker, []byte(""), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing marker file: %v\n", err)
 			os.Exit(1)
 		}
 
@@ -478,4 +496,51 @@ func openFirewall(port int) {
 	fmt.Println("   sudo ufw allow " + portStr + "/tcp")
 	fmt.Println("   # or")
 	fmt.Println("   sudo firewall-cmd --permanent --add-port=" + portStr + "/tcp && sudo firewall-cmd --reload")
+}
+
+func uninstallService() {
+	if os.Getuid() != 0 {
+		fmt.Fprintln(os.Stderr, "Error: uninstall must be run as root")
+		os.Exit(1)
+	}
+
+	fmt.Println("Uninstalling goqrly...")
+
+	// Stop and disable service
+	cmd := exec.Command("systemctl", "stop", "goqrly")
+	cmd.Run()
+	cmd = exec.Command("systemctl", "disable", "goqrly")
+	cmd.Run()
+
+	// Remove service file
+	if _, err := os.Stat(serviceFile); err == nil {
+		os.Remove(serviceFile)
+		fmt.Println("Removed service file")
+	}
+
+	// Reload systemd
+	cmd = exec.Command("systemctl", "daemon-reload")
+	cmd.Run()
+
+	// Remove auto-generated certificates
+	markerPath := certDir + "/" + autoGenMarker
+	if _, err := os.Stat(markerPath); err == nil {
+		os.RemoveAll(certDir)
+		fmt.Println("Removed auto-generated certificates from " + certDir)
+	}
+
+	// Optionally remove binary
+	if removeBinary {
+		if _, err := os.Stat(binaryPath); err == nil {
+			os.Remove(binaryPath)
+			fmt.Println("Removed binary from " + binaryPath)
+		}
+	} else {
+		fmt.Println()
+		fmt.Println("To remove the binary, run:")
+		fmt.Println("   sudo rm " + binaryPath)
+	}
+
+	fmt.Println()
+	fmt.Println("goqrly uninstalled successfully!")
 }
