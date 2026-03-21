@@ -42,6 +42,7 @@ var removeBinary = false
 var indexTmpl = template.Must(template.ParseFS(staticFS, "static/index.html"))
 var viewTmpl = template.Must(template.ParseFS(staticFS, "static/view.html"))
 var lockTmpl = template.Must(template.ParseFS(staticFS, "static/lock.html"))
+var setupTOTPTmpl = template.Must(template.ParseFS(staticFS, "static/setup-totp.html"))
 
 const certDir = "/etc/goqrly"
 const certFileName = "goqrly.crt"
@@ -117,6 +118,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleIndex)
 	mux.HandleFunc("/generate", handleGenerate)
+	mux.HandleFunc("/setup-totp", handleSetupTOTP)
 	mux.HandleFunc("/{key}", handleView)
 	mux.HandleFunc("/qr/{key}", handleQR)
 

@@ -13,6 +13,10 @@
         button:hover { background: #0056b3; }
         .password-toggle { display: flex; align-items: center; margin-top: 4px; }
         .password-toggle label { font-size: 12px; color: #666; cursor: pointer; }
+        .form-row { display: flex; gap: 8px; margin-top: 8px; }
+        .form-row input[type="password"] { margin-top: 0; flex: 1; }
+        .totp-option { display: flex; align-items: center; justify-content: center; gap: 4px; font-size: 12px; color: #666; background: #f0f0f0; padding: 0 12px; border-radius: 4px; flex: 1; }
+        .totp-option input { cursor: pointer; }
         .recent { margin-top: 40px; }
         .recent h2 { font-size: 18px; color: #333; margin-bottom: 20px; }
         .recent-item { margin-bottom: 30px; padding: 20px; background: #fafafa; border-radius: 8px; }
@@ -32,7 +36,10 @@
     <h1>goqrly</h1>
     <form action="/generate" method="POST">
         <input type="text" name="text" placeholder="Enter text or URL" autofocus required>
-        <input type="password" name="password" placeholder="Password (optional)">
+        <div class="form-row">
+            <input type="password" name="password" placeholder="Password (optional)">
+            <label class="totp-option"><input type="checkbox" name="totp"> TOTP</label>
+        </div>
         <button type="submit">Generate</button>
     </form>
 
