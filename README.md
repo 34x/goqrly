@@ -2,6 +2,14 @@
 
 Single-binary QR code generator with web UI. Zero dependencies.
 
+## Quick Setup (one-liner, uses port 80)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/34x/goqrly/main/setup.sh | sudo bash
+```
+
+This downloads the latest binary, installs it as a systemd service on port 80, and opens the firewall.
+
 ## Install Command
 
 Running `sudo ./goqrly install --port 8080` will:
@@ -16,24 +24,17 @@ Running `sudo ./goqrly install --port 8080` will:
 
 ```bash
 # Download binary (replace VERSION and ARCH as needed)
-curl -L https://github.com/34x/goqrly/releases/latest/download/goqrly_linux_amd64 -o goqrly
-chmod +x goqrly
-
-# Install (requires --port)
-sudo ./goqrly install --port 8080
+curl -L https://github.com/34x/goqrly/releases/latest/download/goqrly_linux_amd64.tar.gz -o goqrly.tar.gz && tar -xzvf goqrly.tar.gz && mv goqrly_linux_amd64 goqrly && chmod +x ./goqrly && ./goqrly install --port 80
 ```
 
-That's it. Access at `http://YOUR_IP:8080`
+That's it. Access at `http://YOUR_IP:80`
 
-## Usage
+## Manual Usage without installation as a system service
 
 ```bash
 # Run directly
 ./goqrly                      # default port 8080
 ./goqrly --port 9000          # custom port
-
-# Install as service (requires --port)
-sudo ./goqrly install --port 8080
 ```
 
 ## Features
