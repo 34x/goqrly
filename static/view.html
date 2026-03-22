@@ -40,11 +40,18 @@
     {{else if .Text}}
     <div class="content">{{.Text}}</div>
     {{end}}
-    <div class="code">/{{.Key}}</div>
-    <p><a href="/">Generate another</a></p>
-    <form action="/generate" method="POST">
-        <textarea name="text">{{.Text}}</textarea>
-        <button type="submit">Regenerate</button>
+    <div class="code">/{{.Key}} · {{.UpdatedAt.Format "2006-01-02 15:04"}}{{if .Updated}} · saved{{end}}</div>
+    {{if .IsTOTP}}
+    <form action="/{{.Key}}" method="POST">
+        <textarea name="text" placeholder="Edit content...">{{.Text}}</textarea>
+        <button type="submit">Save Changes</button>
     </form>
+    {{else if .Password}}
+    <form action="/{{.Key}}" method="POST">
+        <textarea name="text" placeholder="Edit content...">{{.Text}}</textarea>
+        <button type="submit">Save Changes</button>
+    </form>
+    {{end}}
+    <p><br><a href="/">Generate another</a></p>
 </body>
 </html>

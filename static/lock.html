@@ -9,11 +9,13 @@
         h1 a { text-decoration: none; color: inherit; }
         a { color: #007bff; }
         form { margin-top: 30px; }
-        input { width: 100%; padding: 12px; font-size: 16px; box-sizing: border-box; }
+        input, textarea { width: 100%; padding: 12px; font-size: 16px; box-sizing: border-box; font-family: inherit; }
+        input[type="password"] { margin-top: 10px; }
         button { width: 100%; padding: 12px; font-size: 16px; margin-top: 10px; background: #007bff; color: white; border: none; cursor: pointer; }
         button:hover { background: #0056b3; }
         .github-link { position: fixed; top: 20px; right: 20px; }
         .error { color: #e74c3c; font-size: 14px; margin-bottom: 10px; }
+        .message { color: #28a745; font-size: 14px; margin-bottom: 10px; font-weight: bold; }
         .unlock-form { max-width: 300px; margin: 0 auto; }
         .code-input { text-align: center; }
         .code-input input { width: 150px; letter-spacing: 4px; text-align: center; }
@@ -30,24 +32,30 @@
         {{if .IsTOTP}}
             {{if .WrongPassword}}
             <p class="error">Invalid code. Try again.</p>
+            {{else if .PendingText}}
+            <p class="message">Authenticate to save changes</p>
             {{else}}
             <p>Enter code from your authenticator app</p>
             {{end}}
             <form action="/{{.Key}}" method="POST">
+                <textarea name="text" style="display:none;">{{.PendingText}}</textarea>
                 <div class="code-input">
                     <input type="text" name="code" placeholder="000000" maxlength="6" pattern="[0-9]{6}" required autofocus>
                 </div>
-                <button type="submit">Unlock</button>
+                <button type="submit">Confirm</button>
             </form>
         {{else}}
             {{if .WrongPassword}}
             <p class="error">Wrong password. Try again.</p>
+            {{else if .PendingText}}
+            <p class="message">Authenticate to save changes</p>
             {{else}}
             <p>Enter password to reveal</p>
             {{end}}
             <form action="/{{.Key}}" method="POST">
+                <textarea name="text" style="display:none;">{{.PendingText}}</textarea>
                 <input type="password" name="password" placeholder="Password" autofocus required>
-                <button type="submit">Unlock</button>
+                <button type="submit">Confirm</button>
             </form>
         {{end}}
     </div>

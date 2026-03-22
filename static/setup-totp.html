@@ -5,16 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Setup TOTP - goqrly</title>
     <style>
-        body { font-family: system-ui, sans-serif; max-width: 400px; margin: 50px auto; padding: 20px; text-align: center; }
+        body { font-family: system-ui, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center; }
         h1 { font-size: 24px; margin-bottom: 10px; }
         .instructions { color: #666; margin-bottom: 20px; font-size: 14px; }
         .qr { margin: 20px auto; padding: 20px; background: #fafafa; border-radius: 8px; display: inline-block; }
         .qr img { display: block; }
         .secret { margin: 15px 0; padding: 10px; background: #f0f0f0; border-radius: 4px; font-family: monospace; font-size: 14px; letter-spacing: 2px; word-break: break-all; }
-        .code-input { margin: 20px 0; }
-        .code-input input { width: 120px; padding: 12px; font-size: 18px; text-align: center; letter-spacing: 4px; border: 1px solid #ccc; border-radius: 4px; }
-        .verify-btn { width: 100%; padding: 12px; font-size: 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
-        .verify-btn:hover { background: #0056b3; }
+        form { margin-top: 30px; }
+        input, textarea { width: 100%; padding: 12px; font-size: 16px; box-sizing: border-box; font-family: inherit; }
+        .code-input { text-align: center; }
+        .code-input input { width: 150px; letter-spacing: 4px; text-align: center; }
+        button { width: 100%; padding: 12px; font-size: 16px; margin-top: 10px; background: #007bff; color: white; border: none; cursor: pointer; }
+        button:hover { background: #0056b3; }
         .error { color: #dc3545; margin: 10px 0; font-size: 14px; }
         .back { margin-top: 20px; }
         .back a { color: #666; text-decoration: none; font-size: 14px; }
@@ -43,7 +45,7 @@
             <input type="text" name="code" placeholder="000000" maxlength="6" pattern="[0-9]{6}" required autofocus>
         </div>
         
-        <button type="submit" class="verify-btn">Verify & Create</button>
+        <button type="submit">Verify & Create</button>
     </form>
     
     <div class="back">

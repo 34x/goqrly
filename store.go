@@ -6,6 +6,7 @@ import (
 	"encoding/base32"
 	"encoding/base64"
 	"strings"
+	"time"
 
 	"github.com/pquerna/otp/totp"
 )
@@ -18,6 +19,7 @@ type Entry struct {
 	Protected  bool
 	Password   string // bcrypt hash, empty if no password
 	TOTPSecret string // base32 secret, empty if not TOTP
+	UpdatedAt  time.Time
 }
 
 type Store struct {
@@ -58,7 +60,7 @@ func ValidateTOTP(secret, code string) bool {
 // GenerateShortcode creates a shortcode for text with optional password protection
 func GenerateShortcode(text, password string) (string, *Entry) {
 	text = strings.TrimSpace(text)
-	entry := &Entry{Text: text, Protected: password != ""}
+	entry := &Entry{Text: text, Protected: password != "", UpdatedAt: time.Now()}
 
 	if password != "" {
 		entry.Password = hashPassword(password)

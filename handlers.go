@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"net/http"
 	"regexp"
+	"time"
 
 	"github.com/skip2/go-qrcode"
 	"github.com/yuin/goldmark"
@@ -21,12 +22,17 @@ type ViewData struct {
 	TextHTML      template.HTML
 	WrongPassword bool
 	IsTOTP        bool
+	PendingText   string // For edit confirmation
+	Password      bool   // True if password protected (for showing edit form)
+	UpdatedAt     time.Time
+	Updated       bool   // True if this response is from a successful edit
 }
 
 type LockData struct {
 	Key           string
 	WrongPassword bool
 	IsTOTP        bool
+	PendingText   string // For edit confirmation
 }
 
 type SetupTOTPData struct {
@@ -281,6 +287,7 @@ func handleSetupTOTP(w http.ResponseWriter, r *http.Request) {
 			Text:       text,
 			Protected:  true,
 			TOTPSecret: secret,
+			UpdatedAt:  time.Now(),
 		}
 
 		// Generate random shortcode
@@ -307,64 +314,105 @@ func handleView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle unlock POST
-	if r.Method == http.MethodPost {
-		r.ParseForm()
-
-		if entry.TOTPSecret != "" {
-			// TOTP unlock
-			code := r.FormValue("code")
-			if ValidateTOTP(entry.TOTPSecret, code) {
-				textHTML := renderMarkdown(entry.Text)
-				textHTML = injectQRCodesIntoHTML(string(textHTML))
-				viewTmpl.Execute(w, ViewData{
-					Key: key, Text: entry.Text, TextHTML: textHTML,
-					IsTOTP: true,
-				})
-				return
+	// GET: show content or lock form
+	if r.Method == http.MethodGet {
+		if entry.Protected {
+			if entry.TOTPSecret != "" {
+				lockTmpl.Execute(w, LockData{Key: key, IsTOTP: true})
+			} else {
+				lockTmpl.Execute(w, LockData{Key: key})
 			}
-		} else if entry.Password != "" {
-			// Password unlock
-			password := r.FormValue("password")
-			if hashPassword(password) == entry.Password {
-				textHTML := renderMarkdown(entry.Text)
-				textHTML = injectQRCodesIntoHTML(string(textHTML))
-				viewTmpl.Execute(w, ViewData{
-					Key: key, Text: entry.Text, TextHTML: textHTML,
-				})
-				return
-			}
+			return
 		}
-
-		// Wrong credentials - show appropriate lock form
-		if entry.TOTPSecret != "" {
-			lockTmpl.Execute(w, LockData{Key: key, WrongPassword: true, IsTOTP: true})
-		} else {
-			lockTmpl.Execute(w, LockData{Key: key, WrongPassword: true})
-		}
+		// Public entry
+		showContent(w, key, entry)
 		return
 	}
 
-	// If protected, show lock form
-	if entry.Protected {
-		if entry.TOTPSecret != "" {
-			lockTmpl.Execute(w, LockData{Key: key, IsTOTP: true})
-		} else {
-			lockTmpl.Execute(w, LockData{Key: key})
+	// POST: parse form
+	r.ParseForm()
+	text := r.FormValue("text")
+	password := r.FormValue("password")
+	code := r.FormValue("code") // TOTP
+
+	// POST with text only → show auth form (protected) or content (public)
+	if text != "" && password == "" && code == "" {
+		if entry.Protected {
+			if entry.TOTPSecret != "" {
+				lockTmpl.Execute(w, LockData{Key: key, IsTOTP: true, PendingText: text})
+			} else {
+				lockTmpl.Execute(w, LockData{Key: key, PendingText: text})
+			}
+			return
 		}
+		// Public entry: ignore text, show content
+		showContent(w, key, entry)
 		return
 	}
 
-	// No password - show QR directly with markdown rendered and QR codes injected
+	// POST with password (and optionally text) → verify
+	if entry.TOTPSecret != "" {
+		// TOTP verification
+		if code != "" && ValidateTOTP(entry.TOTPSecret, code) {
+			updated := false
+			if text != "" {
+				updateEntry(key, text)
+				entry = store.Get(key)
+				updated = true
+			}
+			showContentUpdated(w, key, entry, updated)
+			return
+		}
+	} else if entry.Password != "" {
+		// Password verification
+		if password != "" && hashPassword(password) == entry.Password {
+			updated := false
+			if text != "" {
+				updateEntry(key, text)
+				entry = store.Get(key)
+				updated = true
+			}
+			showContentUpdated(w, key, entry, updated)
+			return
+		}
+	}
+
+	// Verification failed → show auth form
+	if entry.TOTPSecret != "" {
+		lockTmpl.Execute(w, LockData{Key: key, WrongPassword: true, IsTOTP: true, PendingText: text})
+	} else {
+		lockTmpl.Execute(w, LockData{Key: key, WrongPassword: true, PendingText: text})
+	}
+}
+
+func showContentUpdated(w http.ResponseWriter, key string, entry *Entry, updated bool) {
 	textHTML := renderMarkdown(entry.Text)
 	textHTML = injectQRCodesIntoHTML(string(textHTML))
 	viewTmpl.Execute(w, ViewData{
 		Key: key, Text: entry.Text, TextHTML: textHTML,
+		IsTOTP:   entry.TOTPSecret != "",
+		Password: entry.Password != "",
+		UpdatedAt: entry.UpdatedAt,
+		Updated:  updated,
 	})
+}
+
+func showContent(w http.ResponseWriter, key string, entry *Entry) {
+	showContentUpdated(w, key, entry, false)
 }
 
 // buildTOTPURI generates the otpauth URI for a TOTP secret
 func buildTOTPURI(secret string) string {
 	// Label format required by FreeOTP: otpauth://totp/LABEL?secret=SECRET
 	return fmt.Sprintf("otpauth://totp/goqrly?secret=%s", secret)
+}
+
+// updateEntry updates the text of an existing entry
+func updateEntry(key, text string) *Entry {
+	entry := store.Get(key)
+	if entry != nil {
+		entry.Text = text
+		entry.UpdatedAt = time.Now()
+	}
+	return entry
 }

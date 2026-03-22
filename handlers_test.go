@@ -78,8 +78,8 @@ func TestHandleViewProtectedLocked(t *testing.T) {
 	if strings.Contains(w.Body.String(), "data:image/png;base64,") {
 		t.Error("QR should NOT be in locked response")
 	}
-	if !strings.Contains(w.Body.String(), "Unlock") {
-		t.Error("Expected 'Unlock' in locked response")
+	if !strings.Contains(w.Body.String(), "Confirm") {
+		t.Error("Expected 'Confirm' in locked response")
 	}
 }
 
@@ -119,8 +119,8 @@ func TestHandleViewProtectedCorrectPassword(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "data:image/png;base64,") {
 		t.Error("Expected QR in unlocked response")
 	}
-	if strings.Contains(w.Body.String(), "Unlock") {
-		t.Error("Should NOT contain 'Unlock' after correct password")
+	if strings.Contains(w.Body.String(), "Confirm") {
+		t.Error("Should NOT contain 'Confirm' after correct password")
 	}
 }
 
@@ -197,5 +197,124 @@ func TestSameTextSamePassword(t *testing.T) {
 
 	if key1 != key2 {
 		t.Error("Same text with same password should produce same key")
+	}
+}
+
+// Decision Matrix Tests for POST /{key}
+
+// Test POST with text only on public entry (ignored)
+func TestHandleViewPostTextOnlyPublic(t *testing.T) {
+	store = NewStore()
+	mux := testMux()
+
+	key, _ := GenerateShortcode("https://original.com", "")
+
+	req := httptest.NewRequest(http.MethodPost, "/"+key, strings.NewReader("text=https://new.com"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	// Should show content, text change ignored
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "original.com") {
+		t.Error("Should show original text")
+	}
+	if strings.Contains(w.Body.String(), "new.com") {
+		t.Error("Should NOT show new text (ignored for public)")
+	}
+}
+
+// Test POST with text only on protected entry (shows auth form)
+func TestHandleViewPostTextOnlyProtected(t *testing.T) {
+	store = NewStore()
+	mux := testMux()
+
+	key, _ := GenerateShortcode("Secret text", "pass123")
+
+	req := httptest.NewRequest(http.MethodPost, "/"+key, strings.NewReader("text=New text"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "Authenticate to save changes") {
+		t.Error("Should show auth form with message")
+	}
+	if !strings.Contains(w.Body.String(), "Confirm") {
+		t.Error("Should show Confirm button")
+	}
+}
+
+// Test POST with password + text + correct password (update + show content)
+func TestHandleViewPostTextAndPasswordUpdate(t *testing.T) {
+	store = NewStore()
+	mux := testMux()
+
+	key, _ := GenerateShortcode("https://original.com", "pass123")
+
+	req := httptest.NewRequest(http.MethodPost, "/"+key, strings.NewReader("text=https://updated.com&password=pass123"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "updated.com") {
+		t.Error("Should show updated text")
+	}
+	if !strings.Contains(w.Body.String(), "data:image/png;base64,") {
+		t.Error("Should show QR code for updated content")
+	}
+	if strings.Contains(w.Body.String(), "Authenticate") {
+		t.Error("Should NOT show auth message after successful update")
+	}
+}
+
+// Test POST with password + text + wrong password (show auth form with error)
+func TestHandleViewPostTextAndWrongPassword(t *testing.T) {
+	store = NewStore()
+	mux := testMux()
+
+	key, _ := GenerateShortcode("Secret", "correctpass")
+
+	req := httptest.NewRequest(http.MethodPost, "/"+key, strings.NewReader("text=New text&password=wrongpass"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "Wrong password") {
+		t.Error("Should show wrong password error")
+	}
+}
+
+// Test that update preserves the same key
+func TestHandleViewUpdatePreservesKey(t *testing.T) {
+	store = NewStore()
+	mux := testMux()
+
+	key, _ := GenerateShortcode("https://original.com", "pass123")
+
+	// Update the entry
+	req := httptest.NewRequest(http.MethodPost, "/"+key, strings.NewReader("text=https://updated.com&password=pass123"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	// Verify same key still works and shows updated content
+	req2 := httptest.NewRequest(http.MethodPost, "/"+key, strings.NewReader("password=pass123"))
+	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w2 := httptest.NewRecorder()
+	mux.ServeHTTP(w2, req2)
+
+	if !strings.Contains(w2.Body.String(), "updated.com") {
+		t.Error("Same key should show updated content")
 	}
 }
