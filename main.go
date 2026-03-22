@@ -123,7 +123,6 @@ func main() {
 	mux.HandleFunc("/generate", handleGenerate)
 	mux.HandleFunc("/setup-totp", handleSetupTOTP)
 	mux.HandleFunc("/{key}", handleView)
-	mux.HandleFunc("/qr/{key}", handleQR)
 
 	addr := fmt.Sprintf(":%d", serverPort)
 

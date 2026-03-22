@@ -12,7 +12,6 @@ func testMux() *http.ServeMux {
 	mux.HandleFunc("/", handleIndex)
 	mux.HandleFunc("/generate", handleGenerate)
 	mux.HandleFunc("/{key}", handleView)
-	mux.HandleFunc("/qr/{key}", handleQR)
 	return mux
 }
 
@@ -49,7 +48,7 @@ func TestHandleViewUnprotected(t *testing.T) {
 	store = NewStore()
 	mux := testMux()
 	
-	key, _ := GenerateShortcode("Test123", "")
+	key, _ := GenerateShortcode("https://example.com", "")
 
 	req := httptest.NewRequest(http.MethodGet, "/"+key, nil)
 	w := httptest.NewRecorder()
@@ -107,7 +106,7 @@ func TestHandleViewProtectedCorrectPassword(t *testing.T) {
 	store = NewStore()
 	mux := testMux()
 	
-	key, _ := GenerateShortcode("Secret", "secret123")
+	key, _ := GenerateShortcode("https://secret.com", "secret123")
 
 	req := httptest.NewRequest(http.MethodPost, "/"+key, strings.NewReader("password=secret123"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -138,52 +137,6 @@ func TestHandleViewNotFound(t *testing.T) {
 	}
 }
 
-func TestHandleQRUnprotected(t *testing.T) {
-	store = NewStore()
-	mux := testMux()
-	
-	key, _ := GenerateShortcode("Test", "")
-
-	req := httptest.NewRequest(http.MethodGet, "/qr/"+key, nil)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
-	}
-	if w.Header().Get("Content-Type") != "image/png" {
-		t.Errorf("Expected Content-Type image/png, got %s", w.Header().Get("Content-Type"))
-	}
-}
-
-func TestHandleQRProtected(t *testing.T) {
-	store = NewStore()
-	mux := testMux()
-	
-	key, _ := GenerateShortcode("Secret", "pass")
-
-	req := httptest.NewRequest(http.MethodGet, "/qr/"+key, nil)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusFound {
-		t.Errorf("Expected status 302 for protected QR, got %d", w.Code)
-	}
-}
-
-func TestHandleQRNotFound(t *testing.T) {
-	store = NewStore()
-	mux := testMux()
-	
-	req := httptest.NewRequest(http.MethodGet, "/qr/nonexistent", nil)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("Expected status 404, got %d", w.Code)
-	}
-}
-
 func TestHashPassword(t *testing.T) {
 	hash1 := hashPassword("test")
 	hash2 := hashPassword("test")
@@ -209,9 +162,6 @@ func TestGenerateShortcodeUnprotected(t *testing.T) {
 	}
 	if entry.Password != "" {
 		t.Error("Expected empty password")
-	}
-	if len(entry.QR) == 0 {
-		t.Error("Expected non-empty QR")
 	}
 }
 

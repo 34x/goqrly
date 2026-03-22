@@ -1,17 +1,24 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
+	"html/template"
 	"net/http"
+	"regexp"
 
 	"github.com/skip2/go-qrcode"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/renderer/html"
 )
 
 type ViewData struct {
 	Key           string
 	Text          string
-	QRBase64      string
+	TextHTML      template.HTML
 	WrongPassword bool
 	IsTOTP        bool
 }
@@ -37,7 +44,102 @@ type IndexData struct {
 type RecentItem struct {
 	Key      string
 	Text     string
-	QRBase64 string
+	TextHTML template.HTML
+}
+
+// URL regex pattern for detecting links
+var urlPattern = regexp.MustCompile(`https?://[^\s<>"{}|\\^` + "`" + `\[\]]+`)
+
+// markdownRenderer is a shared goldmark instance
+var markdownRenderer goldmark.Markdown
+
+func init() {
+	markdownRenderer = goldmark.New(
+		goldmark.WithExtensions(extension.Linkify),
+		goldmark.WithParserOptions(
+			parser.WithAutoHeadingID(),
+		),
+		goldmark.WithRendererOptions(
+			html.WithHardWraps(),
+			html.WithXHTML(),
+		),
+	)
+}
+
+// renderMarkdown converts markdown text to HTML
+func renderMarkdown(text string) template.HTML {
+	var buf bytes.Buffer
+	if err := markdownRenderer.Convert([]byte(text), &buf); err != nil {
+		return template.HTML(text) // Fallback to plain text on error
+	}
+	return template.HTML(buf.String())
+}
+
+// isURL checks if the text is a valid URL
+func isURL(text string) bool {
+	matched, _ := regexp.MatchString(`^https?://`, text)
+	return matched
+}
+
+// extractURL extracts a URL from text if present
+func extractURL(text string) string {
+	match := urlPattern.FindString(text)
+	return match
+}
+
+// extractURLsFromHTML extracts all unique URLs from rendered HTML
+func extractURLsFromHTML(html string) []string {
+	var urls []string
+	re := regexp.MustCompile(`href="([^"]+)"`)
+	matches := re.FindAllStringSubmatch(html, -1)
+	seen := make(map[string]bool)
+	for _, m := range matches {
+		url := m[1]
+		if !seen[url] {
+			seen[url] = true
+			urls = append(urls, url)
+		}
+	}
+	return urls
+}
+
+// injectQRCodesIntoHTML adds QR code images after each link in the HTML
+func injectQRCodesIntoHTML(html string) template.HTML {
+	// Pattern to match <a href="...">...</a>
+	linkRe := regexp.MustCompile(`(<a\s+href="([^"]+)"[^>]*>)(.*?)(</a>)`)
+
+	// Generate QR for each URL once
+	urlQRs := make(map[string]string)
+	linkRe2 := regexp.MustCompile(`href="([^"]+)"`)
+	for _, matches := range linkRe2.FindAllStringSubmatch(html, -1) {
+		url := matches[1]
+		if _, ok := urlQRs[url]; !ok {
+			qrPNG, err := qrcode.Encode(url, qrcode.Medium, 512)
+			if err == nil {
+				qrBase64 := base64.StdEncoding.EncodeToString(qrPNG)
+				urlQRs[url] = qrBase64
+			}
+		}
+	}
+
+	// Replace each <a href="URL">...</a> with <a href="URL">...</a><br><img src="QR">
+	result := linkRe.ReplaceAllStringFunc(html, func(match string) string {
+		// Extract URL from match
+		urlMatch := regexp.MustCompile(`href="([^"]+)"`)
+		urlMatches := urlMatch.FindStringSubmatch(match)
+		if len(urlMatches) < 2 {
+			return match
+		}
+		url := urlMatches[1]
+		qrBase64, ok := urlQRs[url]
+		if !ok {
+			return match
+		}
+		// Insert QR code image after the link on a new line
+		return match + `<img src="data:image/png;base64,` + qrBase64 + `" style="display:block;width:100%;" alt="QR">`
+	})
+
+	return template.HTML(result)
 }
 
 func handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -56,8 +158,8 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 				if len(text) > 50 {
 					text = text[:47] + "..."
 				}
-				qrBase64 := base64.StdEncoding.EncodeToString(entry.QR)
-				recent = append(recent, RecentItem{Key: key, Text: text, QRBase64: qrBase64})
+				textHTML := renderMarkdown(entry.Text)
+				recent = append(recent, RecentItem{Key: key, Text: text, TextHTML: textHTML})
 			}
 		}
 	}
@@ -93,7 +195,7 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 
 		// Generate QR code for the TOTP secret
 		totpURI := buildTOTPURI(secret)
-		qrPNG, err := qrcode.Encode(totpURI, qrcode.Medium, 256)
+		qrPNG, err := qrcode.Encode(totpURI, qrcode.Medium, 512)
 		if err != nil {
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
@@ -132,7 +234,7 @@ func handleSetupTOTP(w http.ResponseWriter, r *http.Request) {
 
 		// Generate QR for the secret
 		totpURI := buildTOTPURI(entry.TOTPSecret)
-		qrPNG, err := qrcode.Encode(totpURI, qrcode.Medium, 256)
+		qrPNG, err := qrcode.Encode(totpURI, qrcode.Medium, 512)
 		if err != nil {
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
@@ -162,7 +264,7 @@ func handleSetupTOTP(w http.ResponseWriter, r *http.Request) {
 		if !ValidateTOTP(secret, code) {
 			// Show error page
 			uri := buildTOTPURI(secret)
-			qrPNG, _ := qrcode.Encode(uri, qrcode.Medium, 256)
+			qrPNG, _ := qrcode.Encode(uri, qrcode.Medium, 512)
 			qrBase64 := base64.StdEncoding.EncodeToString(qrPNG)
 
 			setupTOTPTmpl.Execute(w, SetupTOTPData{
@@ -180,8 +282,6 @@ func handleSetupTOTP(w http.ResponseWriter, r *http.Request) {
 			Protected:  true,
 			TOTPSecret: secret,
 		}
-		qr, _ := qrcode.Encode(text, qrcode.Medium, 512)
-		entry.QR = qr
 
 		// Generate random shortcode
 		key, _ := GenerateRandomShortcode()
@@ -197,24 +297,6 @@ func handleSetupTOTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.NotFound(w, r)
-}
-
-func handleQR(w http.ResponseWriter, r *http.Request) {
-	key := r.PathValue("key")
-	entry := store.Get(key)
-	if entry == nil {
-		http.NotFound(w, r)
-		return
-	}
-
-	// If protected, redirect to view page for unlock
-	if entry.Protected {
-		http.Redirect(w, r, "/"+key, http.StatusFound)
-		return
-	}
-
-	w.Header().Set("Content-Type", "image/png")
-	w.Write(entry.QR)
 }
 
 func handleView(w http.ResponseWriter, r *http.Request) {
@@ -233,16 +315,23 @@ func handleView(w http.ResponseWriter, r *http.Request) {
 			// TOTP unlock
 			code := r.FormValue("code")
 			if ValidateTOTP(entry.TOTPSecret, code) {
-				qrBase64 := base64.StdEncoding.EncodeToString(entry.QR)
-				viewTmpl.Execute(w, ViewData{Key: key, Text: entry.Text, QRBase64: qrBase64, IsTOTP: true})
+				textHTML := renderMarkdown(entry.Text)
+				textHTML = injectQRCodesIntoHTML(string(textHTML))
+				viewTmpl.Execute(w, ViewData{
+					Key: key, Text: entry.Text, TextHTML: textHTML,
+					IsTOTP: true,
+				})
 				return
 			}
 		} else if entry.Password != "" {
 			// Password unlock
 			password := r.FormValue("password")
 			if hashPassword(password) == entry.Password {
-				qrBase64 := base64.StdEncoding.EncodeToString(entry.QR)
-				viewTmpl.Execute(w, ViewData{Key: key, Text: entry.Text, QRBase64: qrBase64})
+				textHTML := renderMarkdown(entry.Text)
+				textHTML = injectQRCodesIntoHTML(string(textHTML))
+				viewTmpl.Execute(w, ViewData{
+					Key: key, Text: entry.Text, TextHTML: textHTML,
+				})
 				return
 			}
 		}
@@ -266,9 +355,12 @@ func handleView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// No password - show QR directly
-	qrBase64 := base64.StdEncoding.EncodeToString(entry.QR)
-	viewTmpl.Execute(w, ViewData{Key: key, Text: entry.Text, QRBase64: qrBase64})
+	// No password - show QR directly with markdown rendered and QR codes injected
+	textHTML := renderMarkdown(entry.Text)
+	textHTML = injectQRCodesIntoHTML(string(textHTML))
+	viewTmpl.Execute(w, ViewData{
+		Key: key, Text: entry.Text, TextHTML: textHTML,
+	})
 }
 
 // buildTOTPURI generates the otpauth URI for a TOTP secret

@@ -7,6 +7,7 @@
     <style>
         body { font-family: system-ui, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
         h1 { text-align: center; }
+        textarea { width: 100%; padding: 12px; font-size: 16px; box-sizing: border-box; min-height: 100px; resize: vertical; font-family: inherit; }
         input { width: 100%; padding: 12px; font-size: 16px; box-sizing: border-box; }
         input[type="password"] { margin-top: 8px; }
         button { width: 100%; padding: 12px; font-size: 16px; margin-top: 10px; background: #007bff; color: white; border: none; cursor: pointer; }
@@ -21,7 +22,9 @@
         .recent h2 { font-size: 18px; color: #333; margin-bottom: 20px; }
         .recent-item { margin-bottom: 30px; padding: 20px; background: #fafafa; border-radius: 8px; }
         .recent-item img { display: block; margin: 0 auto 15px; border: 1px solid #ddd; max-width: 100%; height: auto; }
-        .recent-item .text { text-align: center; font-size: 14px; color: #666; word-break: break-all; margin-bottom: 8px; }
+        .recent-item .text { text-align: center; font-size: 14px; color: #666; word-break: break-all; margin-bottom: 8px; line-height: 1.5; }
+        .recent-item .text a { color: #007bff; }
+        .recent-item .text code { background: #f4f4f4; padding: 2px 4px; border-radius: 3px; font-size: 13px; }
         .recent-item .code { text-align: center; font-size: 12px; color: #999; }
         .recent-item a { text-decoration: none; }
         .github-link { position: fixed; top: 20px; right: 20px; }
@@ -35,7 +38,7 @@
     </a>
     <h1>goqrly</h1>
     <form action="/generate" method="POST">
-        <input type="text" name="text" placeholder="Enter text or URL" autofocus required>
+        <textarea name="text" placeholder="Enter text, URL, or markdown..." autofocus required></textarea>
         <div class="form-row">
             <input type="password" name="password" placeholder="Password (optional)">
             <label class="totp-option"><input type="checkbox" name="totp"> TOTP</label>
@@ -49,10 +52,11 @@
         {{range .Recent}}
         <a href="/{{.Key}}">
             <div class="recent-item">
-                {{if .QRBase64}}
-                <img src="data:image/png;base64,{{.QRBase64}}" alt="">
-                {{end}}
+                {{if .TextHTML}}
+                <div class="text">{{.TextHTML}}</div>
+                {{else}}
                 <div class="text">{{.Text}}</div>
+                {{end}}
                 <div class="code">/{{.Key}}</div>
             </div>
         </a>

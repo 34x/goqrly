@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/pquerna/otp/totp"
-	"github.com/skip2/go-qrcode"
 )
 
 const minLen = 3
@@ -19,7 +18,6 @@ type Entry struct {
 	Protected  bool
 	Password   string // bcrypt hash, empty if no password
 	TOTPSecret string // base32 secret, empty if not TOTP
-	QR         []byte
 }
 
 type Store struct {
@@ -65,12 +63,6 @@ func GenerateShortcode(text, password string) (string, *Entry) {
 	if password != "" {
 		entry.Password = hashPassword(password)
 	}
-
-	qr, err := qrcode.Encode(text, qrcode.Medium, 512)
-	if err != nil {
-		qr, _ = qrcode.Encode("error", qrcode.Medium, 512)
-	}
-	entry.QR = qr
 
 	// Include password in key generation
 	data := text
