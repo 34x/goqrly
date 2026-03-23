@@ -44,15 +44,30 @@ else
     exit 1
 fi
 
-# Test 5: Protected QR shows lock form on GET (no QR in HTML)
-echo -n "Test 5: Protected QR lock form (no QR in source)... "
+# Test 5: Protected QR shows lock form on GET (no content leaked)
+echo -n "Test 5: Protected QR lock form (no content leaked)... "
 RESPONSE=$(curl -s "$BASE$PROTECTED_KEY")
-if echo "$RESPONSE" | grep -q "Confirm" && ! echo "$RESPONSE" | grep -q "data:image/png;base64,"; then
-    echo "✓"
-else
-    echo "✗"
+
+# Should have password field and confirm button
+if ! echo "$RESPONSE" | grep -q 'type="password"' || 
+   ! echo "$RESPONSE" | grep -q "Confirm"; then
+    echo "✗ (lock form missing)"
     exit 1
 fi
+
+# Should NOT have QR codes
+if echo "$RESPONSE" | grep -q "data:image/png;base64,"; then
+    echo "✗ (QR code leaked)"
+    exit 1
+fi
+
+# Should NOT reveal the entry text (secret.com)
+if echo "$RESPONSE" | grep -q "secret\.com" || echo "$RESPONSE" | grep -q "https://secret\.com"; then
+    echo "✗ (entry text leaked)"
+    exit 1
+fi
+
+echo "✓"
 
 # Test 6: Wrong password
 echo -n "Test 6: Wrong password rejected... "
@@ -65,7 +80,9 @@ fi
 
 # Test 7: Correct password reveals QR
 echo -n "Test 7: Correct password reveals QR... "
-if curl -s -X POST -d "password=secret123" "$BASE$PROTECTED_KEY" | grep -q "data:image/png;base64,"; then
+CONTENT=$(curl -s -X POST -d "password=secret123" "$BASE$PROTECTED_KEY")
+if echo "$CONTENT" | grep -q "data:image/png;base64," && 
+   echo "$CONTENT" | grep -q "secret\.com"; then
     echo "✓"
 else
     echo "✗"
