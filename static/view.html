@@ -43,11 +43,13 @@
     <div class="code">/{{.Key}} · {{.UpdatedAt.Format "2006-01-02 15:04"}}{{if .Updated}} · saved{{end}}</div>
     {{if .IsTOTP}}
     <form action="/{{.Key}}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <textarea name="text" placeholder="Edit content...">{{.Text}}</textarea>
         <button type="submit">Save Changes</button>
     </form>
     {{else if .Password}}
     <form action="/{{.Key}}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <textarea name="text" placeholder="Edit content...">{{.Text}}</textarea>
         <button type="submit">Save Changes</button>
     </form>

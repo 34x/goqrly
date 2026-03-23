@@ -618,3 +618,225 @@ func TestEntryZeroValue(t *testing.T) {
 		t.Error("Zero value Entry should have all empty/false fields")
 	}
 }
+
+// CSRF protection tests
+func TestCSRFStoreGenerateAndValidate(t *testing.T) {
+	csrf := NewCSRFStore()
+
+	clientKey := "192.168.1.1:TestBrowser"
+	token := csrf.GenerateToken(clientKey)
+
+	if token == "" {
+		t.Error("Token should not be empty")
+	}
+
+	// Valid token
+	if !csrf.ValidateToken(token, clientKey) {
+		t.Error("Valid token should pass validation")
+	}
+
+	// Token should be single-use
+	if csrf.ValidateToken(token, clientKey) {
+		t.Error("Token should be invalidated after use")
+	}
+}
+
+func TestCSRFStoreEmptyToken(t *testing.T) {
+	csrf := NewCSRFStore()
+
+	if csrf.ValidateToken("", "client-key") {
+		t.Error("Empty token should be rejected")
+	}
+}
+
+func TestCSRFStoreEmptyClientKey(t *testing.T) {
+	csrf := NewCSRFStore()
+
+	if csrf.ValidateToken("some-token", "") {
+		t.Error("Empty client key should be rejected")
+	}
+}
+
+func TestCSRFStoreWrongClientKey(t *testing.T) {
+	csrf := NewCSRFStore()
+
+	clientKey := "test-client"
+	token := csrf.GenerateToken(clientKey)
+
+	if csrf.ValidateToken(token, "wrong-client") {
+		t.Error("Token should not validate with wrong client key")
+	}
+}
+
+func TestCSRFStoreNonexistentToken(t *testing.T) {
+	csrf := NewCSRFStore()
+
+	if csrf.ValidateToken("nonexistent-token", "client") {
+		t.Error("Nonexistent token should be rejected")
+	}
+}
+
+func TestGenerateSecureToken(t *testing.T) {
+	token1 := generateSecureToken(16)
+	token2 := generateSecureToken(16)
+
+	if token1 == "" || len(token1) == 0 {
+		t.Error("Token should not be empty")
+	}
+
+	if token1 == token2 {
+		t.Error("Tokens should be unique")
+	}
+
+	// Test different lengths
+	token8 := generateSecureToken(8)
+	if len(token8) == 0 {
+		t.Error("Token should have content")
+	}
+}
+
+// Rate limiter tests
+func TestRateLimiterAllow(t *testing.T) {
+	rl := NewRateLimiter(3, time.Minute)
+
+	key := "test-key"
+
+	// First 3 requests should be allowed
+	for i := 0; i < 3; i++ {
+		if !rl.Allow(key) {
+			t.Errorf("Request %d should be allowed", i+1)
+		}
+	}
+
+	// 4th request should be blocked
+	if rl.Allow(key) {
+		t.Error("Request 4 should be blocked")
+	}
+}
+
+func TestRateLimiterRemaining(t *testing.T) {
+	rl := NewRateLimiter(5, time.Minute)
+
+	key := "test-key"
+
+	initial := rl.Remaining(key)
+	if initial != 5 {
+		t.Errorf("Expected 5 remaining, got %d", initial)
+	}
+
+	rl.Allow(key)
+	rl.Allow(key)
+
+	remaining := rl.Remaining(key)
+	if remaining != 3 {
+		t.Errorf("Expected 3 remaining, got %d", remaining)
+	}
+}
+
+func TestRateLimiterReset(t *testing.T) {
+	rl := NewRateLimiter(2, time.Minute)
+
+	key := "test-key"
+
+	// Exhaust limit
+	rl.Allow(key)
+	rl.Allow(key)
+
+	if rl.Allow(key) {
+		t.Error("Should be rate limited")
+	}
+
+	// Reset
+	rl.Reset(key)
+
+	if !rl.Allow(key) {
+		t.Error("Should be allowed after reset")
+	}
+}
+
+func TestRateLimiterDifferentKeys(t *testing.T) {
+	rl := NewRateLimiter(2, time.Minute)
+
+	// Key 1 exhausted
+	rl.Allow("key1")
+	rl.Allow("key1")
+	if rl.Allow("key1") {
+		t.Error("key1 should be rate limited")
+	}
+
+	// Key 2 should still work
+	if !rl.Allow("key2") {
+		t.Error("key2 should be allowed")
+	}
+}
+
+func TestRateLimiterCleanup(t *testing.T) {
+	rl := NewRateLimiter(10, 50*time.Millisecond)
+
+	key := "test-key"
+
+	// Exhaust
+	for i := 0; i < 10; i++ {
+		rl.Allow(key)
+	}
+
+	if rl.Allow(key) {
+		t.Error("Should be rate limited before cleanup")
+	}
+
+	// Wait for window to expire
+	time.Sleep(100 * time.Millisecond)
+
+	// Should be allowed after cleanup
+	if !rl.Allow(key) {
+		t.Error("Should be allowed after window expires")
+	}
+}
+
+// HTTP rate limiter middleware tests
+func TestHTTPLimiterByIP(t *testing.T) {
+	limiter := NewHTTPLimiter(2, time.Minute, LimitByIP)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := limiter.Middleware(mux)
+
+	// First two requests from same IP
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("Request %d should succeed", i+1)
+		}
+	}
+
+	// Third request should be rate limited
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Errorf("Expected 429, got %d", w.Code)
+	}
+}
+
+func TestLimitByIP(t *testing.T) {
+	// Test X-Forwarded-For header (takes precedence)
+	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req2.Header.Set("X-Forwarded-For", "10.0.0.1, 192.168.1.1")
+	key2 := LimitByIP(req2)
+	if key2 != "10.0.0.1" {
+		t.Errorf("Expected first IP from X-Forwarded-For, got %s", key2)
+	}
+
+	// Test X-Real-IP header
+	req3 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req3.Header.Set("X-Real-IP", "172.16.0.1")
+	key3 := LimitByIP(req3)
+	if key3 != "172.16.0.1" {
+		t.Errorf("Expected X-Real-IP, got %s", key3)
+	}
+}

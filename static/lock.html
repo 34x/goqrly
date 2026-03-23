@@ -30,14 +30,17 @@
     <h1><a href="/">goqrly</a> 🔒</h1>
     <div class="unlock-form">
         {{if .IsTOTP}}
-            {{if .WrongPassword}}
-            <p class="error">Invalid code. Try again.</p>
-            {{else if .PendingText}}
-            <p class="message">Authenticate to save changes</p>
-            {{else}}
-            <p>Enter code from your authenticator app</p>
-            {{end}}
+        {{if .RateLimited}}
+        <p class="error">Too many attempts. Please wait a minute and try again.</p>
+        {{else if .WrongPassword}}
+        <p class="error">Invalid code. Try again.</p>
+        {{else if .PendingText}}
+        <p class="message">Authenticate to save changes</p>
+        {{else}}
+        <p>Enter code from your authenticator app</p>
+        {{end}}
             <form action="/{{.Key}}" method="POST">
+                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
                 <textarea name="text" style="display:none;">{{.PendingText}}</textarea>
                 <div class="code-input">
                     <input type="text" name="code" placeholder="000000" maxlength="6" pattern="[0-9]{6}" required autofocus>
@@ -45,14 +48,17 @@
                 <button type="submit">Confirm</button>
             </form>
         {{else}}
-            {{if .WrongPassword}}
-            <p class="error">Wrong password. Try again.</p>
-            {{else if .PendingText}}
-            <p class="message">Authenticate to save changes</p>
-            {{else}}
-            <p>Enter password to reveal</p>
-            {{end}}
+        {{if .RateLimited}}
+        <p class="error">Too many attempts. Please wait a minute and try again.</p>
+        {{else if .WrongPassword}}
+        <p class="error">Wrong password. Try again.</p>
+        {{else if .PendingText}}
+        <p class="message">Authenticate to save changes</p>
+        {{else}}
+        <p>Enter password to reveal</p>
+        {{end}}
             <form action="/{{.Key}}" method="POST">
+                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
                 <textarea name="text" style="display:none;">{{.PendingText}}</textarea>
                 <input type="password" name="password" placeholder="Password" autofocus required>
                 <button type="submit">Confirm</button>

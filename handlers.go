@@ -16,6 +16,18 @@ import (
 	"github.com/yuin/goldmark/renderer/html"
 )
 
+// CSRF store instance
+var csrfStore = NewCSRFStore()
+
+// HTTP rate limiter middleware (global instance)
+var authHTTPLimiter = NewHTTPLimiter(60, time.Minute, LimitByIP)
+
+// Rate limiters for auth attempts (per IP + key)
+var (
+	totpRateLimiter     = NewRateLimiter(10, time.Minute) // 10 TOTP attempts per minute per IP
+	passwordRateLimiter = NewRateLimiter(5, time.Minute)  // 5 password attempts per minute per IP
+)
+
 type ViewData struct {
 	Key           string
 	Text          string
@@ -26,6 +38,7 @@ type ViewData struct {
 	Password      bool   // True if password protected (for showing edit form)
 	UpdatedAt     time.Time
 	Updated       bool   // True if this response is from a successful edit
+	CSRFToken     string // CSRF token for form submission
 }
 
 type LockData struct {
@@ -33,6 +46,8 @@ type LockData struct {
 	WrongPassword bool
 	IsTOTP        bool
 	PendingText   string // For edit confirmation
+	CSRFToken     string // CSRF token for form submission
+	RateLimited   bool   // True if rate limit was exceeded
 }
 
 type SetupTOTPData struct {
@@ -40,11 +55,14 @@ type SetupTOTPData struct {
 	SecretQR    string // base64 QR code of the otpauth URI
 	Text        string
 	WrongCode   bool
+	CSRFToken   string // CSRF token for form submission
+	RateLimited bool   // True if rate limit was exceeded
 }
 
 type IndexData struct {
 	Recent         []RecentItem
 	ShowRecentList bool
+	CSRFToken      string // CSRF token for form submission
 }
 
 type RecentItem struct {
@@ -72,14 +90,51 @@ func init() {
 	)
 }
 
+// clientKey extracts a unique identifier from the request (IP + User-Agent)
+func clientKey(r *http.Request) string {
+	ip := LimitByIP(r)
+	ua := r.Header.Get("User-Agent")
+	return fmt.Sprintf("%s:%s", ip, ua)
+}
+
+// csrfMiddleware ensures CSRF validation for POST requests
+func csrfMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// For POST requests, validate CSRF token
+		if r.Method == http.MethodPost {
+			client := clientKey(r)
+			token := r.FormValue("csrf_token")
+			if !csrfStore.ValidateToken(token, client) {
+				http.Error(w, "Invalid or missing CSRF token. Please refresh the page and try again.", http.StatusForbidden)
+				return
+			}
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 // setupMux configures all HTTP routes - single source of truth for routing
 func setupMux() *http.ServeMux {
 	mux := http.NewServeMux()
+
 	mux.HandleFunc("/", handleIndex)
 	mux.HandleFunc("/generate", handleGenerate)
 	mux.HandleFunc("/setup-totp", handleSetupTOTP)
 	mux.HandleFunc("/{key}", handleView)
+
 	return mux
+}
+
+// handlerWithMiddleware wraps a handler with CSRF and rate limiting middleware
+func handlerWithMiddleware(h http.Handler) http.Handler {
+	// First apply CSRF middleware (session management + CSRF validation)
+	h = csrfMiddleware(h)
+
+	// Then apply HTTP rate limiting middleware
+	h = authHTTPLimiter.Middleware(h)
+
+	return h
 }
 
 // renderMarkdown converts markdown text to HTML
@@ -164,6 +219,9 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	client := clientKey(r)
+	csrfToken := csrfStore.GenerateToken(client)
+
 	recent := make([]RecentItem, 0, recentMax)
 	if listRecentPublic {
 		for i := len(recentCodes) - 1; i >= 0 && len(recent) < recentMax; i-- {
@@ -180,7 +238,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	indexTmpl.Execute(w, IndexData{Recent: recent, ShowRecentList: listRecentPublic})
+	indexTmpl.Execute(w, IndexData{Recent: recent, ShowRecentList: listRecentPublic, CSRFToken: csrfToken})
 }
 
 func handleGenerate(w http.ResponseWriter, r *http.Request) {
@@ -218,10 +276,14 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 		}
 		qrBase64 := base64.StdEncoding.EncodeToString(qrPNG)
 
+		sessionID := clientKey(r)
+		csrfToken := csrfStore.GenerateToken(sessionID)
+
 		setupTOTPTmpl.Execute(w, SetupTOTPData{
-			Secret:   secret,
-			SecretQR: qrBase64,
-			Text:     text,
+			Secret:    secret,
+			SecretQR:  qrBase64,
+			Text:      text,
+			CSRFToken: csrfToken,
 		})
 		return
 	}
@@ -257,10 +319,14 @@ func handleSetupTOTP(w http.ResponseWriter, r *http.Request) {
 		}
 		qrBase64 := base64.StdEncoding.EncodeToString(qrPNG)
 
+		client := clientKey(r)
+		csrfToken := csrfStore.GenerateToken(client)
+
 		setupTOTPTmpl.Execute(w, SetupTOTPData{
-			Secret:   entry.TOTPSecret,
-			SecretQR: qrBase64,
-			Text:     entry.Text,
+			Secret:    entry.TOTPSecret,
+			SecretQR:  qrBase64,
+			Text:      entry.Text,
+			CSRFToken: csrfToken,
 		})
 		return
 	}
@@ -276,6 +342,26 @@ func handleSetupTOTP(w http.ResponseWriter, r *http.Request) {
 		code := r.FormValue("code")
 		text := r.FormValue("text")
 
+		// Rate limit TOTP attempts
+		clientIP := LimitByIP(r)
+		if !totpRateLimiter.Allow(clientIP) {
+			client := clientKey(r)
+			csrfToken := csrfStore.GenerateToken(client)
+			uri := buildTOTPURI(secret)
+			qrPNG, _ := qrcode.Encode(uri, qrcode.Medium, 512)
+			qrBase64 := base64.StdEncoding.EncodeToString(qrPNG)
+
+			setupTOTPTmpl.Execute(w, SetupTOTPData{
+				Secret:      secret,
+				SecretQR:    qrBase64,
+				Text:        text,
+				WrongCode:   true,
+				CSRFToken:   csrfToken,
+				RateLimited: true,
+			})
+			return
+		}
+
 		// Validate the code
 		if !ValidateTOTP(secret, code) {
 			// Show error page
@@ -283,11 +369,15 @@ func handleSetupTOTP(w http.ResponseWriter, r *http.Request) {
 			qrPNG, _ := qrcode.Encode(uri, qrcode.Medium, 512)
 			qrBase64 := base64.StdEncoding.EncodeToString(qrPNG)
 
+			client := clientKey(r)
+			csrfToken := csrfStore.GenerateToken(client)
+
 			setupTOTPTmpl.Execute(w, SetupTOTPData{
 				Secret:    secret,
 				SecretQR:  qrBase64,
 				Text:      text,
 				WrongCode: true,
+				CSRFToken: csrfToken,
 			})
 			return
 		}
@@ -324,13 +414,16 @@ func handleView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	client := clientKey(r)
+	csrfToken := csrfStore.GenerateToken(client)
+
 	// GET: show content or lock form
 	if r.Method == http.MethodGet {
 		if entry.Protected {
 			if entry.TOTPSecret != "" {
-				lockTmpl.Execute(w, LockData{Key: key, IsTOTP: true})
+				lockTmpl.Execute(w, LockData{Key: key, IsTOTP: true, CSRFToken: csrfToken})
 			} else {
-				lockTmpl.Execute(w, LockData{Key: key})
+				lockTmpl.Execute(w, LockData{Key: key, CSRFToken: csrfToken})
 			}
 			return
 		}
@@ -349,9 +442,9 @@ func handleView(w http.ResponseWriter, r *http.Request) {
 	if text != "" && password == "" && code == "" {
 		if entry.Protected {
 			if entry.TOTPSecret != "" {
-				lockTmpl.Execute(w, LockData{Key: key, IsTOTP: true, PendingText: text})
+				lockTmpl.Execute(w, LockData{Key: key, IsTOTP: true, PendingText: text, CSRFToken: csrfToken})
 			} else {
-				lockTmpl.Execute(w, LockData{Key: key, PendingText: text})
+				lockTmpl.Execute(w, LockData{Key: key, PendingText: text, CSRFToken: csrfToken})
 			}
 			return
 		}
@@ -360,55 +453,74 @@ func handleView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	clientIP := LimitByIP(r)
+
 	// POST with password (and optionally text) → verify
 	if entry.TOTPSecret != "" {
 		// TOTP verification
 		if code != "" && ValidateTOTP(entry.TOTPSecret, code) {
+			// Reset rate limit on success
+			totpRateLimiter.Reset(clientIP + ":" + key)
 			updated := false
 			if text != "" {
 				updateEntry(key, text)
 				entry = store.Get(key)
 				updated = true
 			}
-			showContentUpdated(w, key, entry, updated)
+			showContentUpdated(w, key, entry, updated, csrfToken)
+			return
+		}
+
+		// Rate limit failed TOTP attempts
+		if !totpRateLimiter.Allow(clientIP + ":" + key) {
+			lockTmpl.Execute(w, LockData{Key: key, WrongPassword: true, IsTOTP: true, PendingText: text, CSRFToken: csrfToken, RateLimited: true})
 			return
 		}
 	} else if entry.Password != "" {
 		// Password verification
 		if password != "" && verifyPassword(entry.Password, password) {
+			// Reset rate limit on success
+			passwordRateLimiter.Reset(clientIP + ":" + key)
 			updated := false
 			if text != "" {
 				updateEntry(key, text)
 				entry = store.Get(key)
 				updated = true
 			}
-			showContentUpdated(w, key, entry, updated)
+			showContentUpdated(w, key, entry, updated, csrfToken)
+			return
+		}
+
+		// Rate limit failed password attempts
+		if !passwordRateLimiter.Allow(clientIP + ":" + key) {
+			lockTmpl.Execute(w, LockData{Key: key, WrongPassword: true, PendingText: text, CSRFToken: csrfToken, RateLimited: true})
 			return
 		}
 	}
 
 	// Verification failed → show auth form
 	if entry.TOTPSecret != "" {
-		lockTmpl.Execute(w, LockData{Key: key, WrongPassword: true, IsTOTP: true, PendingText: text})
+		lockTmpl.Execute(w, LockData{Key: key, WrongPassword: true, IsTOTP: true, PendingText: text, CSRFToken: csrfToken})
 	} else {
-		lockTmpl.Execute(w, LockData{Key: key, WrongPassword: true, PendingText: text})
+		lockTmpl.Execute(w, LockData{Key: key, WrongPassword: true, PendingText: text, CSRFToken: csrfToken})
 	}
 }
 
-func showContentUpdated(w http.ResponseWriter, key string, entry *Entry, updated bool) {
+func showContentUpdated(w http.ResponseWriter, key string, entry *Entry, updated bool, csrfToken string) {
 	textHTML := renderMarkdown(entry.Text)
 	textHTML = injectQRCodesIntoHTML(string(textHTML))
 	viewTmpl.Execute(w, ViewData{
 		Key: key, Text: entry.Text, TextHTML: textHTML,
-		IsTOTP:   entry.TOTPSecret != "",
-		Password: entry.Password != "",
+		IsTOTP:    entry.TOTPSecret != "",
+		Password:  entry.Password != "",
 		UpdatedAt: entry.UpdatedAt,
-		Updated:  updated,
+		Updated:   updated,
+		CSRFToken: csrfToken,
 	})
 }
 
 func showContent(w http.ResponseWriter, key string, entry *Entry) {
-	showContentUpdated(w, key, entry, false)
+	showContentUpdated(w, key, entry, false, "")
 }
 
 // buildTOTPURI generates the otpauth URI for a TOTP secret

@@ -47,6 +47,23 @@ const autoGenMarker = "auto-generated"
 const serviceFile = "/etc/systemd/system/goqrly.service"
 const binaryPath = "/usr/local/bin/goqrly"
 
+const firstTestPort = 8080
+const lastTestPort = 8090
+
+// availablePorts returns a list of ports that are currently free
+func availablePorts() []int {
+	ports := []int{}
+	for port := firstTestPort; port <= lastTestPort; port++ {
+		addr := fmt.Sprintf(":%d", port)
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			ln.Close()
+			ports = append(ports, port)
+		}
+	}
+	return ports
+}
+
 func main() {
 	args := os.Args[1:]
 
@@ -58,35 +75,43 @@ func main() {
 		}
 	}
 
-	cfg := ParseArgs(args)
-
-	// Handle commands
-	switch cfg.Command {
-	case "install":
-		installService(cfg)
-		return
-	case "uninstall":
-		uninstallService()
-		return
+	// For install/uninstall commands, parse without port selection
+	if len(args) > 0 && (args[0] == "install" || args[0] == "uninstall") {
+		cfg := ParseArgs(args, nil)
+		switch cfg.Command {
+		case "install":
+			installService(cfg)
+			return
+		case "uninstall":
+			uninstallService()
+			return
+		}
 	}
+
+	cfg := ParseArgs(args, availablePorts())
 
 	// Update globals from config
 	recentMax = cfg.RecentMax
 	listRecentPublic = cfg.ListRecentPublic
 
-	// Setup firewall (only if running as root)
-	setupFirewall(cfg.Port)
+	port := cfg.Port
 
-	addr := fmt.Sprintf(":%d", cfg.Port)
+	// Setup firewall (only if running as root)
+	setupFirewall(port)
+
+	addr := fmt.Sprintf(":%d", port)
 	mux := setupMux()
+
+	// Wrap with middleware (CSRF + rate limiting)
+	handler := handlerWithMiddleware(mux)
 
 	// Determine TLS mode
 	useTLS := cfg.TLSEnabled || (cfg.CertFile != "" && cfg.KeyFile != "")
 
 	if useTLS && cfg.CertFile != "" && cfg.KeyFile != "" {
 		// Use provided certificates
-		fmt.Printf("goqrly running on https://0.0.0.0:%d\n", cfg.Port)
-		if err := http.ListenAndServeTLS(addr, cfg.CertFile, cfg.KeyFile, mux); err != nil {
+		fmt.Printf("goqrly running on https://0.0.0.0:%d\n", port)
+		if err := http.ListenAndServeTLS(addr, cfg.CertFile, cfg.KeyFile, handler); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -106,15 +131,15 @@ func main() {
 			MinVersion: tls.VersionTLS12,
 			Certificates: []tls.Certificate{cert},
 		}
-		fmt.Printf("goqrly running on https://0.0.0.0:%d (self-signed cert)\n", cfg.Port)
-		server := &http.Server{Addr: addr, TLSConfig: tlsConfig, Handler: mux}
+		fmt.Printf("goqrly running on https://0.0.0.0:%d (self-signed cert)\n", port)
+		server := &http.Server{Addr: addr, TLSConfig: tlsConfig, Handler: handler}
 		if err := server.ListenAndServeTLS("", ""); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 	} else {
-		fmt.Printf("goqrly running on http://0.0.0.0:%d\n", cfg.Port)
-		if err := http.ListenAndServe(addr, mux); err != nil {
+		fmt.Printf("goqrly running on http://0.0.0.0:%d\n", port)
+		if err := http.ListenAndServe(addr, handler); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}

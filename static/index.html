@@ -38,6 +38,7 @@
     </a>
     <h1>goqrly</h1>
     <form action="/generate" method="POST">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <textarea name="text" placeholder="Enter text, URL, or markdown..." autofocus required></textarea>
         <div class="form-row">
             <input type="password" name="password" placeholder="Password (optional)">

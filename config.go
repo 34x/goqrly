@@ -20,16 +20,18 @@ type Config struct {
 
 // Default configuration values
 const (
-	DefaultPort   = 8080
-	MinPort       = 1      // Allow any port; user needs sudo for privileged ports
-	MaxPort       = 65535
-	PortHTTPS     = 443
-	PortAltHTTPS  = 8443
-	DefaultRecent = 12
+	DefaultPort    = 8080
+	MinPort        = 1
+	MaxPort        = 65535
+	PortHTTPS      = 443
+	PortAltHTTPS   = 8443
+	DefaultRecent  = 12
+	FirstTestPort  = 8080
+	LastTestPort   = 8090 // Range for auto-port selection in dev mode
 )
 
 // ParseArgs parses command-line arguments and returns fully resolved Config
-func ParseArgs(args []string) Config {
+func ParseArgs(args []string, availablePorts []int) Config {
 	cfg := Config{
 		Port:       DefaultPort,
 		RecentMax:  DefaultRecent,
@@ -82,6 +84,11 @@ func ParseArgs(args []string) Config {
 	// Apply auto-TLS logic for standard HTTPS ports
 	if !cfg.TLSDExplicitlyDisabled && (cfg.Port == PortHTTPS || cfg.Port == PortAltHTTPS) {
 		cfg.TLSEnabled = true
+	}
+
+	// Select port: explicit port, or first available
+	if !cfg.ExplicitPort && len(availablePorts) > 0 {
+		cfg.Port = availablePorts[0]
 	}
 
 	return cfg

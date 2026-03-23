@@ -33,11 +33,14 @@
     
     <p class="secret">{{.Secret}}</p>
     
-    {{if .WrongCode}}
+    {{if .RateLimited}}
+    <p class="error">Too many attempts. Please wait a minute and try again.</p>
+    {{else if .WrongCode}}
     <p class="error">Invalid code. Please try again.</p>
     {{end}}
     
     <form action="/setup-totp" method="POST">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <input type="hidden" name="secret" value="{{.Secret}}">
         <input type="hidden" name="text" value="{{.Text}}">
         

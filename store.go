@@ -6,6 +6,7 @@ import (
 	"encoding/base32"
 	"encoding/base64"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -25,6 +26,7 @@ type Entry struct {
 }
 
 type Store struct {
+	mu      sync.RWMutex
 	entries map[string]*Entry
 }
 
@@ -33,10 +35,14 @@ func NewStore() *Store {
 }
 
 func (s *Store) Get(key string) *Entry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.entries[strings.ToLower(key)]
 }
 
 func (s *Store) Put(key string, e *Entry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.entries[strings.ToLower(key)] = e
 }
 
