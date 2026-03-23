@@ -140,13 +140,16 @@ func TestHandleViewNotFound(t *testing.T) {
 func TestHashPassword(t *testing.T) {
 	hash1 := hashPassword("test")
 	hash2 := hashPassword("test")
-	hash3 := hashPassword("different")
 
-	if hash1 != hash2 {
-		t.Error("Same password should produce same hash")
+	if hash1 == "" || hash2 == "" {
+		t.Error("Hash should not be empty")
 	}
-	if hash1 == hash3 {
-		t.Error("Different passwords should produce different hashes")
+	// bcrypt produces different hashes each time (salt), so we check verification instead
+	if !verifyPassword(hash1, "test") || !verifyPassword(hash2, "test") {
+		t.Error("Hash should verify original password")
+	}
+	if verifyPassword(hash1, "different") {
+		t.Error("Hash should not verify wrong password")
 	}
 }
 

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/pquerna/otp/totp"
 )
 
@@ -79,8 +81,16 @@ func GenerateShortcode(text, password string) (string, *Entry) {
 			store.Put(key, entry)
 			return key, entry
 		}
-		if existing.Text == text && existing.Password == entry.Password {
-			return key, existing
+		// Check if this is the same entry (same text and password)
+		// For password-protected entries, verify the password matches
+		if existing.Text == text {
+			if password == "" && existing.Password == "" {
+				// Both unprotected
+				return key, existing
+			} else if password != "" && existing.Password != "" && verifyPassword(existing.Password, password) {
+				// Same protection and password matches
+				return key, existing
+			}
 		}
 	}
 
@@ -92,8 +102,13 @@ func GenerateShortcode(text, password string) (string, *Entry) {
 				store.Put(key, entry)
 				return key, entry
 			}
-			if existing.Text == text && existing.Password == entry.Password {
-				return key, existing
+			// Check if this is the same entry (same text and password)
+			if existing.Text == text {
+				if password == "" && existing.Password == "" {
+					return key, existing
+				} else if password != "" && existing.Password != "" && verifyPassword(existing.Password, password) {
+					return key, existing
+				}
 			}
 		}
 	}
@@ -142,6 +157,15 @@ func generateRandomBase32(length int) string {
 }
 
 func hashPassword(password string) string {
-	hash := sha256.Sum256([]byte(password))
-	return base64.RawURLEncoding.EncodeToString(hash[:])
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		// Fallback to empty password on error (should not happen with valid input)
+		return ""
+	}
+	return string(bytes)
+}
+
+func verifyPassword(hash, password string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
 }

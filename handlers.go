@@ -365,7 +365,7 @@ func handleView(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if entry.Password != "" {
 		// Password verification
-		if password != "" && hashPassword(password) == entry.Password {
+		if password != "" && verifyPassword(entry.Password, password) {
 			updated := false
 			if text != "" {
 				updateEntry(key, text)

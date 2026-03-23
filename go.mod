@@ -8,4 +8,7 @@ require (
 	github.com/yuin/goldmark v1.7.4
 )
 
-require github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc // indirect
+require (
+	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc // indirect
+	golang.org/x/crypto v0.49.0 // indirect
+)
