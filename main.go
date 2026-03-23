@@ -30,13 +30,8 @@ var store = NewStore()
 var recentCodes []string
 var recentMax = 12
 var listRecentPublic = false
-var serverPort = 8080
-var defaultPort = 8080
 
-// TLS settings
-var tlsEnabled = false
-var certFile = ""
-var keyFile = ""
+// Legacy global flags (for backward compatibility during transition)
 var forceOverwrite = false
 var removeBinary = false
 
@@ -55,80 +50,48 @@ const binaryPath = "/usr/local/bin/goqrly"
 func main() {
 	args := os.Args[1:]
 
-	// Parse global flags
-	for i, arg := range args {
-		switch arg {
-		case "--port":
-			if i+1 < len(args) {
-				if p, err := strconv.Atoi(args[i+1]); err == nil {
-					serverPort = p
-				}
-			}
-		case "--recent":
-			if i+1 < len(args) {
-				if n, err := strconv.Atoi(args[i+1]); err == nil && n > 0 {
-					recentMax = n
-				}
-			}
-		case "--tls":
-			tlsEnabled = true
-			if serverPort == 8080 && !hasExplicitPort(args) {
-				serverPort = 443
-			} else if serverPort == 8443 && !hasExplicitPort(args) {
-				serverPort = 443
-			}
-		case "--cert":
-			if i+1 < len(args) {
-				certFile = args[i+1]
-			}
-		case "--key":
-			if i+1 < len(args) {
-				keyFile = args[i+1]
-			}
-		case "--force":
-			forceOverwrite = true
-		case "--remove-binary":
-			removeBinary = true
-		case "--list-recent-public":
-			listRecentPublic = true
-		}
-	}
-
-	if len(args) > 0 {
-		switch args[0] {
-		case "-h", "--help":
+	// Check for help flags before parsing
+	for _, arg := range args {
+		if arg == "-h" || arg == "--help" {
 			printHelp()
 			return
-		case "install":
-			// Install defaults to port 443 with TLS
-			if serverPort == 8080 {
-				serverPort = 443
-				tlsEnabled = true
-			}
-			installService()
-			return
-		case "uninstall":
-			uninstallService()
-			return
 		}
 	}
 
-	// Determine if we need TLS
-	useTLS := tlsEnabled || (certFile != "" && keyFile != "")
+	cfg := ParseArgs(args)
 
-	setupFirewall(serverPort)
+	// Handle commands
+	switch cfg.Command {
+	case "install":
+		installService(cfg)
+		return
+	case "uninstall":
+		uninstallService()
+		return
+	}
 
-	addr := fmt.Sprintf(":%d", serverPort)
+	// Update globals from config
+	recentMax = cfg.RecentMax
+	listRecentPublic = cfg.ListRecentPublic
+
+	// Setup firewall (only if running as root)
+	setupFirewall(cfg.Port)
+
+	addr := fmt.Sprintf(":%d", cfg.Port)
 	mux := setupMux()
 
-	if useTLS && certFile != "" && keyFile != "" {
-		fmt.Printf("goqrly running on https://0.0.0.0:%d\n", serverPort)
-		if err := http.ListenAndServeTLS(addr, certFile, keyFile, mux); err != nil {
+	// Determine TLS mode
+	useTLS := cfg.TLSEnabled || (cfg.CertFile != "" && cfg.KeyFile != "")
+
+	if useTLS && cfg.CertFile != "" && cfg.KeyFile != "" {
+		// Use provided certificates
+		fmt.Printf("goqrly running on https://0.0.0.0:%d\n", cfg.Port)
+		if err := http.ListenAndServeTLS(addr, cfg.CertFile, cfg.KeyFile, mux); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 	} else if useTLS {
-		// Generate in-memory cert
+		// Generate in-memory self-signed cert
 		certPEM, keyPEM, err := generateSelfSignedCert()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error generating certificate: %v\n", err)
@@ -143,28 +106,19 @@ func main() {
 			MinVersion: tls.VersionTLS12,
 			Certificates: []tls.Certificate{cert},
 		}
-		fmt.Printf("goqrly running on https://0.0.0.0:%d (self-signed cert)\n", serverPort)
+		fmt.Printf("goqrly running on https://0.0.0.0:%d (self-signed cert)\n", cfg.Port)
 		server := &http.Server{Addr: addr, TLSConfig: tlsConfig, Handler: mux}
 		if err := server.ListenAndServeTLS("", ""); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 	} else {
-		fmt.Printf("goqrly running on http://0.0.0.0:%d\n", serverPort)
+		fmt.Printf("goqrly running on http://0.0.0.0:%d\n", cfg.Port)
 		if err := http.ListenAndServe(addr, mux); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 	}
-}
-
-func hasExplicitPort(args []string) bool {
-	for i, arg := range args {
-		if arg == "--port" && i+1 < len(args) {
-			return true
-		}
-	}
-	return false
 }
 
 func printHelp() {
@@ -181,13 +135,15 @@ Options:
   --recent <n>             Number of recent codes on index page (default: 12)
   --list-recent-public     Show recent public entries on index page
   --tls                    Enable TLS with self-signed certificate
+  --tls-disable            Disable auto-TLS for ports 443/8443
   --cert <path>            Path to TLS certificate
   --key <path>             Path to TLS private key
   --remove-binary          Remove binary when uninstalling
 
 Examples:
   goqrly                              # Run on port 8080
-  goqrly --tls                        # Run on port 443 with self-signed cert
+  goqrly --tls                        # Run on port 8080 with self-signed TLS
+  goqrly --port 443                   # Run on port 443 with auto-TLS
   goqrly --list-recent-public         # Show recent public entries on homepage
   sudo goqrly install                 # Install with TLS on port 443 (default)
   sudo goqrly install --port 8080     # Install without TLS on port 8080
@@ -203,23 +159,20 @@ func setupFirewall(port int) {
 	cmd.Run()
 }
 
-func installService() {
+func installService(cfg Config) {
 	if os.Getuid() != 0 {
 		fmt.Fprintln(os.Stderr, "Error: install must be run as root")
 		os.Exit(1)
 	}
 
-	// Determine TLS mode
-	useTLS := tlsEnabled || (certFile != "" && keyFile != "")
-	autoGenCerts := tlsEnabled && certFile == "" && keyFile == ""
-	useCertFile := certFile
-	useKeyFile := keyFile
+	// Get install-specific configuration
+	installCfg := cfg.InstallConfig()
 
-	// Auto-enable TLS for ports 443 and 8443
-	if !useTLS && (serverPort == 443 || serverPort == 8443) {
-		useTLS = true
-		autoGenCerts = true
-	}
+	// Determine TLS mode
+	useTLS := installCfg.TLSEnabled || (installCfg.CertFile != "" && installCfg.KeyFile != "")
+	autoGenCerts := useTLS && installCfg.CertFile == "" && installCfg.KeyFile == ""
+	useCertFile := installCfg.CertFile
+	useKeyFile := installCfg.KeyFile
 
 	// Generate certs if needed
 	if autoGenCerts {
@@ -298,7 +251,7 @@ func installService() {
 	ip := detectPublicIP()
 
 	// Build ExecStart line
-	portStr := strconv.Itoa(serverPort)
+	portStr := strconv.Itoa(installCfg.Port)
 	execStart := "/usr/local/bin/goqrly --port " + portStr
 	if useTLS {
 		execStart += " --cert " + useCertFile + " --key " + useKeyFile
@@ -331,7 +284,7 @@ WantedBy=multi-user.target
 	cmd.Run()
 
 	// Try to open firewall
-	openFirewall(serverPort)
+	openFirewall(installCfg.Port)
 
 	// Print result
 	proto := "http"
