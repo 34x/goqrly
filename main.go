@@ -118,13 +118,8 @@ func main() {
 
 	setupFirewall(serverPort)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", handleIndex)
-	mux.HandleFunc("/generate", handleGenerate)
-	mux.HandleFunc("/setup-totp", handleSetupTOTP)
-	mux.HandleFunc("/{key}", handleView)
-
 	addr := fmt.Sprintf(":%d", serverPort)
+	mux := setupMux()
 
 	if useTLS && certFile != "" && keyFile != "" {
 		fmt.Printf("goqrly running on https://0.0.0.0:%d\n", serverPort)

@@ -72,6 +72,16 @@ func init() {
 	)
 }
 
+// setupMux configures all HTTP routes - single source of truth for routing
+func setupMux() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", handleIndex)
+	mux.HandleFunc("/generate", handleGenerate)
+	mux.HandleFunc("/setup-totp", handleSetupTOTP)
+	mux.HandleFunc("/{key}", handleView)
+	return mux
+}
+
 // renderMarkdown converts markdown text to HTML
 func renderMarkdown(text string) template.HTML {
 	var buf bytes.Buffer
