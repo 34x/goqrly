@@ -369,7 +369,7 @@ func TestIntegrationCaseInsensitiveShortcode(t *testing.T) {
 	defer server.Close()
 
 	// Reset store for this test
-	store = NewStore()
+	store = NewMemoryStore()
 
 	client := &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		return http.ErrUseLastResponse
@@ -449,7 +449,7 @@ func TestIntegrationContentTypes(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			store = NewStore() // Fresh store for each test
+			store = NewMemoryStore() // Fresh store for each test
 
 			resp, err := client.PostForm(server.URL+"/generate", url.Values{
 				"text": []string{tc.text},
@@ -482,7 +482,7 @@ func TestIntegrationTimestamps(t *testing.T) {
 	server := setupTestServer(t)
 	defer server.Close()
 
-	store = NewStore()
+	store = NewMemoryStore()
 
 	client := &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		return http.ErrUseLastResponse

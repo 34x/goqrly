@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ func TestHandleIndex(t *testing.T) {
 }
 
 func TestHandleGenerate(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	mux := setupMux()
 
 	req := httptest.NewRequest(http.MethodPost, "/generate", strings.NewReader("text=Hello"))
@@ -42,7 +43,7 @@ func TestHandleGenerate(t *testing.T) {
 }
 
 func TestHandleViewUnprotected(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	mux := setupMux()
 
 	key, _ := GenerateShortcode("https://example.com", "")
@@ -60,7 +61,7 @@ func TestHandleViewUnprotected(t *testing.T) {
 }
 
 func TestHandleViewProtectedLocked(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	mux := setupMux()
 
 	key, _ := GenerateShortcode("Secret", "pass123")
@@ -81,7 +82,7 @@ func TestHandleViewProtectedLocked(t *testing.T) {
 }
 
 func TestHandleViewProtectedWrongPassword(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	mux := setupMux()
 
 	key, _ := GenerateShortcode("Secret", "mypassword")
@@ -100,7 +101,7 @@ func TestHandleViewProtectedWrongPassword(t *testing.T) {
 }
 
 func TestHandleViewProtectedCorrectPassword(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	mux := setupMux()
 
 	key, _ := GenerateShortcode("https://secret.com", "secret123")
@@ -122,7 +123,7 @@ func TestHandleViewProtectedCorrectPassword(t *testing.T) {
 }
 
 func TestHandleViewNotFound(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	mux := setupMux()
 
 	req := httptest.NewRequest(http.MethodGet, "/nonexistent123", nil)
@@ -135,7 +136,7 @@ func TestHandleViewNotFound(t *testing.T) {
 }
 
 func TestHandleViewPostTextOnlyPublic(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	mux := setupMux()
 
 	key, _ := GenerateShortcode("https://original.com", "")
@@ -157,7 +158,7 @@ func TestHandleViewPostTextOnlyPublic(t *testing.T) {
 }
 
 func TestHandleViewPostTextOnlyProtected(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	mux := setupMux()
 
 	key, _ := GenerateShortcode("Secret text", "pass123")
@@ -179,7 +180,7 @@ func TestHandleViewPostTextOnlyProtected(t *testing.T) {
 }
 
 func TestHandleViewPostTextAndPasswordUpdate(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	mux := setupMux()
 
 	key, _ := GenerateShortcode("https://original.com", "pass123")
@@ -204,7 +205,7 @@ func TestHandleViewPostTextAndPasswordUpdate(t *testing.T) {
 }
 
 func TestHandleViewPostTextAndWrongPassword(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	mux := setupMux()
 
 	key, _ := GenerateShortcode("Secret", "correctpass")
@@ -223,7 +224,7 @@ func TestHandleViewPostTextAndWrongPassword(t *testing.T) {
 }
 
 func TestHandleViewUpdatePreservesKey(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	mux := setupMux()
 
 	key, _ := GenerateShortcode("https://original.com", "pass123")
@@ -244,7 +245,7 @@ func TestHandleViewUpdatePreservesKey(t *testing.T) {
 }
 
 func TestHandleGenerateEmptyText(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	mux := setupMux()
 
 	req := httptest.NewRequest(http.MethodPost, "/generate", strings.NewReader("text="))
@@ -258,7 +259,7 @@ func TestHandleGenerateEmptyText(t *testing.T) {
 }
 
 func TestHandleGenerateSpecialChars(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	mux := setupMux()
 
 	text := "https://example.com/?id=123&ref=abc#section"
@@ -280,7 +281,7 @@ func TestHandleGenerateSpecialChars(t *testing.T) {
 }
 
 func TestHandleViewSpecialKey(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	mux := setupMux()
 
 	keys := []string{"abc123", "XYZ", "aaa", "zzz", "test-1"}
@@ -298,7 +299,7 @@ func TestHandleViewSpecialKey(t *testing.T) {
 }
 
 func TestHandleGenerateWithTOTP(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	mux := setupMux()
 
 	req := httptest.NewRequest(http.MethodPost, "/generate", strings.NewReader("text=https://example.com&totp=on"))
@@ -377,7 +378,7 @@ func TestPasswordVerifyWrongHash(t *testing.T) {
 
 // TOTP tests (no mux needed)
 func TestTOTPSecretGeneration(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	key, entry := GenerateRandomShortcode()
 
 	if key == "" {
@@ -418,7 +419,7 @@ func TestValidateTOTP(t *testing.T) {
 
 // Shortcode tests (no mux needed)
 func TestGenerateShortcodeUnprotected(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	key, entry := GenerateShortcode("Hello", "")
 
 	if key == "" {
@@ -433,7 +434,7 @@ func TestGenerateShortcodeUnprotected(t *testing.T) {
 }
 
 func TestGenerateShortcodeProtected(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	key, entry := GenerateShortcode("Secret", "password123")
 
 	if key == "" {
@@ -461,7 +462,7 @@ func TestGenerateShortcodeProtected(t *testing.T) {
 }
 
 func TestSameTextDifferentPassword(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	key1, _ := GenerateShortcode("Hello", "pass1")
 	key2, _ := GenerateShortcode("Hello", "pass2")
 
@@ -471,7 +472,7 @@ func TestSameTextDifferentPassword(t *testing.T) {
 }
 
 func TestSameTextSamePassword(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	key1, _ := GenerateShortcode("World", "password")
 	key2, _ := GenerateShortcode("World", "password")
 
@@ -481,7 +482,7 @@ func TestSameTextSamePassword(t *testing.T) {
 }
 
 func TestShortcodeCollisionHandling(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 
 	key1, _ := GenerateShortcode("test", "pass")
 	key2, _ := GenerateShortcode("test", "pass")
@@ -498,7 +499,7 @@ func TestShortcodeCollisionHandling(t *testing.T) {
 }
 
 func TestShortcodeCaseInsensitivity(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 	key, _ := GenerateShortcode("Hello", "")
 
 	for _, testKey := range []string{key, strings.ToUpper(key), strings.ToLower(key)} {
@@ -513,7 +514,7 @@ func TestShortcodeCaseInsensitivity(t *testing.T) {
 }
 
 func TestGenerateShortcodeEmptyText(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 
 	key, entry := GenerateShortcode("", "")
 	if key == "" {
@@ -525,7 +526,7 @@ func TestGenerateShortcodeEmptyText(t *testing.T) {
 }
 
 func TestGenerateRandomShortcodeNotEmpty(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 
 	for i := 0; i < 100; i++ {
 		key, _ := GenerateRandomShortcode()
@@ -539,7 +540,7 @@ func TestGenerateRandomShortcodeNotEmpty(t *testing.T) {
 }
 
 func TestGenerateRandomShortcodeUnique(t *testing.T) {
-	store = NewStore()
+	store = NewMemoryStore()
 
 	keys := make(map[string]bool)
 	for i := 0; i < 100; i++ {
@@ -562,7 +563,7 @@ func TestGenerateRandomShortcodeCollisionOnFullStore(t *testing.T) {
 
 // Store tests (no mux needed)
 func TestStoreGetPut(t *testing.T) {
-	s := NewStore()
+	s := NewMemoryStore()
 
 	e := &Entry{Text: "Test content", UpdatedAt: time.Now()}
 	s.Put("testkey", e)
@@ -577,7 +578,7 @@ func TestStoreGetPut(t *testing.T) {
 }
 
 func TestStoreGetNonExistent(t *testing.T) {
-	s := NewStore()
+	s := NewMemoryStore()
 
 	if s.Get("nonexistent") != nil {
 		t.Error("Non-existent key should return nil")
@@ -585,7 +586,7 @@ func TestStoreGetNonExistent(t *testing.T) {
 }
 
 func TestStorePutNilEntry(t *testing.T) {
-	s := NewStore()
+	s := NewMemoryStore()
 
 	s.Put("test", nil)
 
@@ -595,7 +596,7 @@ func TestStorePutNilEntry(t *testing.T) {
 }
 
 func TestStoreOverwrite(t *testing.T) {
-	s := NewStore()
+	s := NewMemoryStore()
 
 	e1 := &Entry{Text: "First", UpdatedAt: time.Now()}
 	s.Put("key", e1)
@@ -927,7 +928,7 @@ func TestEntryDecryptWithKey(t *testing.T) {
 	text := "Secret content"
 
 	// Create entry using GenerateShortcode (which encrypts)
-	store := NewStore()
+	store := NewMemoryStore()
 	shortcode, entry := GenerateShortcode(text, password)
 
 	if entry.Text != "" {
@@ -949,7 +950,7 @@ func TestEntryDecryptWithKey(t *testing.T) {
 }
 
 func TestEntryDecryptWithWrongPassword(t *testing.T) {
-	store := NewStore()
+	store := NewMemoryStore()
 	shortcode, entry := GenerateShortcode("Secret", "correctpassword")
 
 	// Try with wrong password
@@ -961,7 +962,7 @@ func TestEntryDecryptWithWrongPassword(t *testing.T) {
 }
 
 func TestUnprotectedEntryNotEncrypted(t *testing.T) {
-	store := NewStore()
+	store := NewMemoryStore()
 	_, entry := GenerateShortcode("Public content", "")
 
 	// Unprotected entries should have text directly
@@ -975,4 +976,164 @@ func TestUnprotectedEntryNotEncrypted(t *testing.T) {
 		t.Error("Unprotected entry should have Protected=false")
 	}
 	_ = store // silence unused variable warning
+}
+
+// FileStore tests
+func TestFileStoreNewDirectory(t *testing.T) {
+	dir := t.TempDir() + "/data"
+	fs, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("Failed to create FileStore: %v", err)
+	}
+	if fs == nil {
+		t.Error("Expected non-nil FileStore")
+	}
+
+	// Check that server key was created
+	keyPath := dir + "/" + serverKeyFile
+	if _, err := os.Stat(keyPath); os.IsNotExist(err) {
+		t.Error("Server key file should be created")
+	}
+}
+
+func TestFileStorePutGet(t *testing.T) {
+	dir := t.TempDir() + "/data"
+	fs, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("Failed to create FileStore: %v", err)
+	}
+
+	// Put an entry
+	entry := &Entry{
+		Text:      "Hello World",
+		UpdatedAt: time.Now(),
+	}
+	fs.Put("abc123", entry)
+
+	// Get it back
+	retrieved := fs.Get("abc123")
+	if retrieved == nil {
+		t.Fatal("Entry not found")
+	}
+	if retrieved.Text != "Hello World" {
+		t.Errorf("Expected 'Hello World', got '%s'", retrieved.Text)
+	}
+}
+
+func TestFileStoreCaseInsensitive(t *testing.T) {
+	dir := t.TempDir() + "/data"
+	fs, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("Failed to create FileStore: %v", err)
+	}
+
+	entry := &Entry{
+		Text:      "Test",
+		UpdatedAt: time.Now(),
+	}
+	fs.Put("ABC123", entry)
+
+	// Should retrieve with different case
+	retrieved := fs.Get("abc123")
+	if retrieved == nil {
+		t.Error("Entry should be retrievable with lowercase key")
+	}
+
+	retrieved = fs.Get("ABC123")
+	if retrieved == nil {
+		t.Error("Entry should be retrievable with uppercase key")
+	}
+}
+
+func TestFileStoreNonExistent(t *testing.T) {
+	dir := t.TempDir() + "/data"
+	fs, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("Failed to create FileStore: %v", err)
+	}
+
+	retrieved := fs.Get("nonexistent")
+	if retrieved != nil {
+		t.Error("Non-existent entry should return nil")
+	}
+}
+
+func TestFileStoreExistingDirectoryNoKey(t *testing.T) {
+	dir := t.TempDir()
+	// Create directory without server key
+	os.MkdirAll(dir, 0750)
+
+	_, err := NewFileStore(dir)
+	if err == nil {
+		t.Error("Should fail when directory exists without server key")
+	}
+}
+
+func TestFileStoreExistingDirectoryWithKey(t *testing.T) {
+	dir := t.TempDir()
+	// Create directory with server key
+	os.MkdirAll(dir, 0750)
+	os.WriteFile(dir+"/"+serverKeyFile, []byte("dGhpcyBpcyBhIHRlc3Qga2V5"), 0600)
+
+	fs, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("Should succeed with existing directory and key: %v", err)
+	}
+	if fs == nil {
+		t.Error("Expected non-nil FileStore")
+	}
+}
+
+func TestFileStoreOverwrite(t *testing.T) {
+	dir := t.TempDir() + "/data"
+	fs, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("Failed to create FileStore: %v", err)
+	}
+
+	// Put entry
+	entry1 := &Entry{Text: "First", UpdatedAt: time.Now()}
+	fs.Put("test", entry1)
+
+	// Overwrite
+	entry2 := &Entry{Text: "Second", UpdatedAt: time.Now()}
+	fs.Put("test", entry2)
+
+	// Should get second entry
+	retrieved := fs.Get("test")
+	if retrieved == nil {
+		t.Fatal("Entry not found")
+	}
+	if retrieved.Text != "Second" {
+		t.Errorf("Expected 'Second', got '%s'", retrieved.Text)
+	}
+}
+
+func TestFileStorePasswordProtected(t *testing.T) {
+	dir := t.TempDir() + "/data"
+	fs, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("Failed to create FileStore: %v", err)
+	}
+
+	// Create password-protected entry
+	entry := &Entry{
+		Protected:     true,
+		Password:      "$2a$10$test-hash",
+		EncryptedData: "encrypted-content",
+		UpdatedAt:     time.Now(),
+	}
+	fs.Put("secret", entry)
+
+	// Retrieve and verify
+	retrieved := fs.Get("secret")
+	if retrieved == nil {
+		t.Fatal("Entry not found")
+	}
+	if !retrieved.Protected {
+		t.Error("Entry should be protected")
+	}
+	if retrieved.EncryptedData != "encrypted-content" {
+		t.Error("EncryptedData should be preserved")
+	}
 }

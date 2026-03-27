@@ -17,6 +17,7 @@ import (
 const minLen = 3
 const maxLen = 6
 
+// Entry represents a QR code entry
 type Entry struct {
 	Text          string    // Decrypted text (populated only for public entries or after decryption)
 	EncryptedData string    // Base64-encoded (nonce + ciphertext), empty if not protected
@@ -60,22 +61,30 @@ func (e *Entry) DecryptWithKey(password, shortcode string) (string, error) {
 	return decrypt(e.EncryptedData, key)
 }
 
-type Store struct {
+// Store defines the interface for entry storage
+type Store interface {
+	Get(key string) *Entry
+	Put(key string, e *Entry)
+}
+
+// MemoryStore implements Store with in-memory storage
+type MemoryStore struct {
 	mu      sync.RWMutex
 	entries map[string]*Entry
 }
 
-func NewStore() *Store {
-	return &Store{entries: make(map[string]*Entry)}
+// NewMemoryStore creates a new in-memory store
+func NewMemoryStore() *MemoryStore {
+	return &MemoryStore{entries: make(map[string]*Entry)}
 }
 
-func (s *Store) Get(key string) *Entry {
+func (s *MemoryStore) Get(key string) *Entry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.entries[strings.ToLower(key)]
 }
 
-func (s *Store) Put(key string, e *Entry) {
+func (s *MemoryStore) Put(key string, e *Entry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.entries[strings.ToLower(key)] = e

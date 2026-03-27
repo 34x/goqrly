@@ -13,6 +13,7 @@ type Config struct {
 	KeyFile           string
 	RecentMax         int
 	ListRecentPublic  bool
+	DataDir           string // Data directory for persistent storage
 	Command           string // "run", "install", "uninstall"
 	ExplicitPort      bool   // true if --port was explicitly provided
 	TLSDExplicitlyDisabled bool // true if --tls-disable was explicitly provided
@@ -61,6 +62,10 @@ func ParseArgs(args []string, availablePorts []int) Config {
 				if n, err := strconv.Atoi(args[i+1]); err == nil && n > 0 {
 					cfg.RecentMax = n
 				}
+			}
+		case "--data-dir":
+			if i+1 < len(args) {
+				cfg.DataDir = args[i+1]
 			}
 		case "--tls":
 			cfg.TLSEnabled = true
@@ -124,6 +129,9 @@ func (c *Config) String() string {
 	}
 	if c.KeyFile != "" {
 		parts = append(parts, "key:"+c.KeyFile)
+	}
+	if c.DataDir != "" {
+		parts = append(parts, "data-dir:"+c.DataDir)
 	}
 	if c.Command != "" {
 		parts = append(parts, "cmd:"+c.Command)

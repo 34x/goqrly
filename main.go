@@ -26,7 +26,7 @@ import (
 //go:embed static
 var staticFS embed.FS
 
-var store = NewStore()
+var store Store
 var recentCodes []string
 var recentMax = 12
 var listRecentPublic = false
@@ -64,6 +64,19 @@ func availablePorts() []int {
 	return ports
 }
 
+// initStore creates the appropriate store based on config
+func initStore(cfg Config) (Store, error) {
+	if cfg.DataDir != "" {
+		fs, err := NewFileStore(cfg.DataDir)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Printf("Using persistent storage: %s\n", cfg.DataDir)
+		return fs, nil
+	}
+	return NewMemoryStore(), nil
+}
+
 func main() {
 	args := os.Args[1:]
 
@@ -89,6 +102,14 @@ func main() {
 	}
 
 	cfg := ParseArgs(args, availablePorts())
+
+	// Initialize store (memory or file-based)
+	var err error
+	store, err = initStore(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error initializing store: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Update globals from config
 	recentMax = cfg.RecentMax
@@ -159,6 +180,7 @@ Options:
   --port <n>               Port to listen on (default: 8080)
   --recent <n>             Number of recent codes on index page (default: 12)
   --list-recent-public     Show recent public entries on index page
+  --data-dir <path>        Data directory for persistent storage (default: in-memory)
   --tls                    Enable TLS with self-signed certificate
   --tls-disable            Disable auto-TLS for ports 443/8443
   --cert <path>            Path to TLS certificate
@@ -166,11 +188,13 @@ Options:
   --remove-binary          Remove binary when uninstalling
 
 Examples:
-  goqrly                              # Run on port 8080
+  goqrly                              # Run on port 8080 (in-memory)
+  goqrly --data-dir ./data            # Run with persistent storage
   goqrly --tls                        # Run on port 8080 with self-signed TLS
   goqrly --port 443                   # Run on port 443 with auto-TLS
   goqrly --list-recent-public         # Show recent public entries on homepage
   sudo goqrly install                 # Install with TLS on port 443 (default)
+  sudo goqrly install --data-dir /var/lib/goqrly  # Install with persistent storage
   sudo goqrly install --port 8080     # Install without TLS on port 8080
   sudo goqrly uninstall               # Remove service, keep certs and binary
   sudo goqrly uninstall --remove-binary  # Remove everything`)
@@ -272,6 +296,15 @@ func installService(cfg Config) {
 		os.Chmod(dstPath, 0755)
 	}
 
+	// Create data directory if specified
+	if installCfg.DataDir != "" {
+		if err := os.MkdirAll(installCfg.DataDir, 0750); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating data directory: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Data directory: %s\n", installCfg.DataDir)
+	}
+
 	// Detect public IP (1 second timeout)
 	ip := detectPublicIP()
 
@@ -280,6 +313,9 @@ func installService(cfg Config) {
 	execStart := "/usr/local/bin/goqrly --port " + portStr
 	if useTLS {
 		execStart += " --cert " + useCertFile + " --key " + useKeyFile
+	}
+	if installCfg.DataDir != "" {
+		execStart += " --data-dir " + installCfg.DataDir
 	}
 
 	// Write systemd service
