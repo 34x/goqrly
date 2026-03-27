@@ -463,7 +463,7 @@ func handleView(w http.ResponseWriter, r *http.Request) {
 			totpRateLimiter.Reset(clientIP + ":" + key)
 			updated := false
 			if text != "" {
-				updateEntry(key, text)
+				updateEntry(key, text, "") // TOTP entries not encrypted in this stage
 				entry = store.Get(key)
 				updated = true
 			}
@@ -481,13 +481,28 @@ func handleView(w http.ResponseWriter, r *http.Request) {
 		if password != "" && verifyPassword(entry.Password, password) {
 			// Reset rate limit on success
 			passwordRateLimiter.Reset(clientIP + ":" + key)
+			
+			// Decrypt the entry text
+			var decryptedText string
+			if entry.EncryptedData != "" {
+				decrypted, err := entry.DecryptWithKey(password, key)
+				if err != nil {
+					// Decryption failed - show error
+					lockTmpl.Execute(w, LockData{Key: key, WrongPassword: true, PendingText: text, CSRFToken: csrfToken})
+					return
+				}
+				decryptedText = decrypted
+			} else {
+				decryptedText = entry.Text
+			}
+			
 			updated := false
 			if text != "" {
-				updateEntry(key, text)
-				entry = store.Get(key)
+				updateEntry(key, text, password)
+				decryptedText = text
 				updated = true
 			}
-			showContentUpdated(w, key, entry, updated, csrfToken)
+			showContentDecrypted(w, key, entry, decryptedText, updated, csrfToken)
 			return
 		}
 
@@ -523,6 +538,20 @@ func showContent(w http.ResponseWriter, key string, entry *Entry) {
 	showContentUpdated(w, key, entry, false, "")
 }
 
+// showContentDecrypted displays content with pre-decrypted text (for password-protected entries)
+func showContentDecrypted(w http.ResponseWriter, key string, entry *Entry, text string, updated bool, csrfToken string) {
+	textHTML := renderMarkdown(text)
+	textHTML = injectQRCodesIntoHTML(string(textHTML))
+	viewTmpl.Execute(w, ViewData{
+		Key: key, Text: text, TextHTML: textHTML,
+		IsTOTP:    entry.TOTPSecret != "",
+		Password:  entry.Password != "",
+		UpdatedAt: entry.UpdatedAt,
+		Updated:   updated,
+		CSRFToken: csrfToken,
+	})
+}
+
 // buildTOTPURI generates the otpauth URI for a TOTP secret
 func buildTOTPURI(secret string) string {
 	// Label format required by FreeOTP: otpauth://totp/LABEL?secret=SECRET
@@ -530,11 +559,31 @@ func buildTOTPURI(secret string) string {
 }
 
 // updateEntry updates the text of an existing entry
-func updateEntry(key, text string) *Entry {
+// For password-protected entries, encrypts the text with the provided password
+func updateEntry(key, text, password string) *Entry {
 	entry := store.Get(key)
-	if entry != nil {
-		entry.Text = text
-		entry.UpdatedAt = time.Now()
+	if entry == nil {
+		return nil
 	}
+
+	entry.UpdatedAt = time.Now()
+
+	if entry.Password != "" && password != "" {
+		// Password-protected entry: encrypt the new text
+		encKey := deriveKey(password, key)
+		encrypted, err := encrypt(text, encKey)
+		if err != nil {
+			// Fallback to unencrypted on error
+			entry.Text = text
+			entry.EncryptedData = ""
+		} else {
+			entry.Text = ""
+			entry.EncryptedData = encrypted
+		}
+	} else {
+		// Public entry: store text directly
+		entry.Text = text
+	}
+
 	return entry
 }

@@ -439,11 +439,24 @@ func TestGenerateShortcodeProtected(t *testing.T) {
 	if key == "" {
 		t.Error("Expected non-empty key")
 	}
-	if entry.Text != "Secret" {
-		t.Error("Expected text 'Secret'")
+	// For password-protected entries, Text should be empty and EncryptedData should be populated
+	if entry.Text != "" {
+		t.Error("Expected empty text for encrypted entry")
+	}
+	if entry.EncryptedData == "" {
+		t.Error("Expected non-empty encrypted data for password-protected entry")
 	}
 	if entry.Password == "" {
 		t.Error("Expected non-empty password hash")
+	}
+
+	// Verify we can decrypt with the correct password
+	decrypted, err := entry.DecryptWithKey("password123", key)
+	if err != nil {
+		t.Errorf("Failed to decrypt: %v", err)
+	}
+	if decrypted != "Secret" {
+		t.Errorf("Expected decrypted text 'Secret', got '%s'", decrypted)
 	}
 }
 
@@ -839,4 +852,127 @@ func TestLimitByIP(t *testing.T) {
 	if key3 != "172.16.0.1" {
 		t.Errorf("Expected X-Real-IP, got %s", key3)
 	}
+}
+
+// Encryption tests
+func TestEncryptDecrypt(t *testing.T) {
+	password := "mySecretPassword"
+	salt := "testshortcode"
+	plaintext := "This is my secret text"
+
+	// Derive key from password
+	key := deriveKey(password, salt)
+
+	// Encrypt
+	encrypted, err := encrypt(plaintext, key)
+	if err != nil {
+		t.Fatalf("Encryption failed: %v", err)
+	}
+	if encrypted == "" {
+		t.Error("Encrypted text should not be empty")
+	}
+
+	// Decrypt
+	decrypted, err := decrypt(encrypted, key)
+	if err != nil {
+		t.Fatalf("Decryption failed: %v", err)
+	}
+	if decrypted != plaintext {
+		t.Errorf("Expected '%s', got '%s'", plaintext, decrypted)
+	}
+}
+
+func TestEncryptDecryptWrongKey(t *testing.T) {
+	password := "mySecretPassword"
+	wrongPassword := "wrongPassword"
+	salt := "testshortcode"
+	plaintext := "Secret message"
+
+	key := deriveKey(password, salt)
+	wrongKey := deriveKey(wrongPassword, salt)
+
+	encrypted, err := encrypt(plaintext, key)
+	if err != nil {
+		t.Fatalf("Encryption failed: %v", err)
+	}
+
+	// Try to decrypt with wrong key
+	_, err = decrypt(encrypted, wrongKey)
+	if err == nil {
+		t.Error("Expected decryption to fail with wrong key")
+	}
+}
+
+func TestEncryptDecryptDifferentSalt(t *testing.T) {
+	password := "mySecretPassword"
+	plaintext := "Secret message"
+
+	key1 := deriveKey(password, "salt1")
+	key2 := deriveKey(password, "salt2")
+
+	encrypted, err := encrypt(plaintext, key1)
+	if err != nil {
+		t.Fatalf("Encryption failed: %v", err)
+	}
+
+	// Try to decrypt with different salt
+	_, err = decrypt(encrypted, key2)
+	if err == nil {
+		t.Error("Expected decryption to fail with different salt")
+	}
+}
+
+func TestEntryDecryptWithKey(t *testing.T) {
+	password := "password123"
+	text := "Secret content"
+
+	// Create entry using GenerateShortcode (which encrypts)
+	store := NewStore()
+	shortcode, entry := GenerateShortcode(text, password)
+
+	if entry.Text != "" {
+		t.Error("Password-protected entry Text should be empty")
+	}
+	if entry.EncryptedData == "" {
+		t.Error("Password-protected entry should have EncryptedData")
+	}
+
+	// Verify decryption works
+	decrypted, err := entry.DecryptWithKey(password, shortcode)
+	if err != nil {
+		t.Fatalf("DecryptWithKey failed: %v", err)
+	}
+	if decrypted != text {
+		t.Errorf("Expected '%s', got '%s'", text, decrypted)
+	}
+	_ = store // silence unused variable warning
+}
+
+func TestEntryDecryptWithWrongPassword(t *testing.T) {
+	store := NewStore()
+	shortcode, entry := GenerateShortcode("Secret", "correctpassword")
+
+	// Try with wrong password
+	_, err := entry.DecryptWithKey("wrongpassword", shortcode)
+	if err == nil {
+		t.Error("Expected decryption to fail with wrong password")
+	}
+	_ = store // silence unused variable warning
+}
+
+func TestUnprotectedEntryNotEncrypted(t *testing.T) {
+	store := NewStore()
+	_, entry := GenerateShortcode("Public content", "")
+
+	// Unprotected entries should have text directly
+	if entry.Text != "Public content" {
+		t.Errorf("Expected 'Public content', got '%s'", entry.Text)
+	}
+	if entry.EncryptedData != "" {
+		t.Error("Unprotected entry should not have EncryptedData")
+	}
+	if entry.Protected {
+		t.Error("Unprotected entry should have Protected=false")
+	}
+	_ = store // silence unused variable warning
 }

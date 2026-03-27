@@ -18,11 +18,46 @@ const minLen = 3
 const maxLen = 6
 
 type Entry struct {
-	Text       string
-	Protected  bool
-	Password   string // bcrypt hash, empty if no password
-	TOTPSecret string // base32 secret, empty if not TOTP
-	UpdatedAt  time.Time
+	Text          string    // Decrypted text (populated only for public entries or after decryption)
+	EncryptedData string    // Base64-encoded (nonce + ciphertext), empty if not protected
+	Protected     bool      // True if password or TOTP protected
+	Password      string    // bcrypt hash, empty if no password
+	TOTPSecret    string    // base32 secret, empty if not TOTP
+	UpdatedAt     time.Time
+}
+
+// Decrypt attempts to decrypt the entry text using the provided password.
+// Returns the decrypted text and true if successful, or empty string and false on failure.
+// For non-password-protected entries, returns Text and true.
+func (e *Entry) Decrypt(password string) (string, bool) {
+	if !e.Protected || e.Password == "" {
+		// Not password-protected, return text directly
+		return e.Text, true
+	}
+
+	if e.EncryptedData == "" {
+		// Legacy entry without encryption (shouldn't happen)
+		return e.Text, true
+	}
+
+	if password == "" {
+		return "", false
+	}
+
+	// Need to derive key, but we need the shortcode as salt
+	// This is called from handlers where we have access to the key
+	return "", false
+}
+
+// DecryptWithKey decrypts the entry text using password and shortcode (used as salt).
+// Returns decrypted text or error.
+func (e *Entry) DecryptWithKey(password, shortcode string) (string, error) {
+	if e.EncryptedData == "" {
+		return e.Text, nil
+	}
+
+	key := deriveKey(password, shortcode)
+	return decrypt(e.EncryptedData, key)
 }
 
 type Store struct {
@@ -68,11 +103,6 @@ func ValidateTOTP(secret, code string) bool {
 // GenerateShortcode creates a shortcode for text with optional password protection
 func GenerateShortcode(text, password string) (string, *Entry) {
 	text = strings.TrimSpace(text)
-	entry := &Entry{Text: text, Protected: password != "", UpdatedAt: time.Now()}
-
-	if password != "" {
-		entry.Password = hashPassword(password)
-	}
 
 	// Include password in key generation
 	data := text
@@ -80,44 +110,90 @@ func GenerateShortcode(text, password string) (string, *Entry) {
 		data = text + "\x00" + password
 	}
 
+	// Find an available key
 	for length := minLen; length <= maxLen; length++ {
 		key := generateKey(data, length, 0)
 		existing := store.Get(key)
 		if existing == nil {
-			store.Put(key, entry)
-			return key, entry
+			// Found empty slot - create new entry
+			return createEntry(key, text, password)
 		}
-		// Check if this is the same entry (same text and password)
-		// For password-protected entries, verify the password matches
-		if existing.Text == text {
-			if password == "" && existing.Password == "" {
-				// Both unprotected
-				return key, existing
-			} else if password != "" && existing.Password != "" && verifyPassword(existing.Password, password) {
-				// Same protection and password matches
-				return key, existing
-			}
+		// Check if this is the same entry
+		if isSameEntry(existing, key, text, password) {
+			return key, existing
 		}
 	}
 
+	// Try with salt for collision resolution
 	for salt := 1; ; salt++ {
 		for length := minLen; length <= maxLen; length++ {
 			key := generateKey(data, length, salt)
 			existing := store.Get(key)
 			if existing == nil {
-				store.Put(key, entry)
-				return key, entry
+				// Found empty slot - create new entry
+				return createEntry(key, text, password)
 			}
-			// Check if this is the same entry (same text and password)
-			if existing.Text == text {
-				if password == "" && existing.Password == "" {
-					return key, existing
-				} else if password != "" && existing.Password != "" && verifyPassword(existing.Password, password) {
-					return key, existing
-				}
+			// Check if this is the same entry
+			if isSameEntry(existing, key, text, password) {
+				return key, existing
 			}
 		}
 	}
+}
+
+// createEntry creates and stores a new entry
+func createEntry(key, text, password string) (string, *Entry) {
+	entry := &Entry{Protected: password != "", UpdatedAt: time.Now()}
+
+	if password != "" {
+		entry.Password = hashPassword(password)
+		// Encrypt text with key derived from password + shortcode
+		encKey := deriveKey(password, key)
+		encrypted, err := encrypt(text, encKey)
+		if err != nil {
+			// Fallback to unencrypted on error (should not happen)
+			entry.Text = text
+		} else {
+			entry.EncryptedData = encrypted
+		}
+	} else {
+		entry.Text = text
+	}
+
+	store.Put(key, entry)
+	return key, entry
+}
+
+// isSameEntry checks if an existing entry matches the new text and password
+func isSameEntry(existing *Entry, key, text, password string) bool {
+	if existing == nil {
+		return false
+	}
+
+	// For password-protected entries, verify password matches
+	if password != "" && existing.Password != "" {
+		if !verifyPassword(existing.Password, password) {
+			return false
+		}
+		// Password matches - decrypt and compare text
+		if existing.EncryptedData != "" {
+			encKey := deriveKey(password, key)
+			decrypted, err := decrypt(existing.EncryptedData, encKey)
+			if err != nil {
+				return false
+			}
+			return decrypted == text
+		}
+		// Legacy unencrypted entry
+		return existing.Text == text
+	}
+
+	// For unprotected entries, compare text directly
+	if password == "" && existing.Password == "" {
+		return existing.Text == text
+	}
+
+	return false
 }
 
 // GenerateRandomShortcode creates a random shortcode for TOTP entries
