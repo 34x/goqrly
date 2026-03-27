@@ -25,3 +25,4 @@ Thumbs.db
 # Output
 *.tar.gz
 *.zip
+tmp/

@@ -1060,12 +1060,33 @@ func TestFileStoreNonExistent(t *testing.T) {
 
 func TestFileStoreExistingDirectoryNoKey(t *testing.T) {
 	dir := t.TempDir()
-	// Create directory without server key
+	// Create directory without server key but WITH entry file (inconsistent state)
 	os.MkdirAll(dir, 0750)
+	os.WriteFile(dir+"/test.json", []byte(`{"key":"test"}`), 0644)
 
 	_, err := NewFileStore(dir)
 	if err == nil {
-		t.Error("Should fail when directory exists without server key")
+		t.Error("Should fail when directory has entries but no server key")
+	}
+}
+
+func TestFileStoreExistingDirectoryEmptyNoKey(t *testing.T) {
+	dir := t.TempDir()
+	// Create empty directory without server key (should succeed)
+	os.MkdirAll(dir, 0750)
+
+	fs, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("Should succeed with empty directory: %v", err)
+	}
+	if fs == nil {
+		t.Error("Expected non-nil FileStore")
+	}
+
+	// Server key should be created
+	keyPath := dir + "/" + serverKeyFile
+	if _, err := os.Stat(keyPath); os.IsNotExist(err) {
+		t.Error("Server key file should be created")
 	}
 }
 

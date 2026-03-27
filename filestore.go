@@ -35,7 +35,7 @@ type storedEntry struct {
 }
 
 // NewFileStore creates a new file-based store
-// Returns error if data directory exists but is inconsistent (e.g., missing server key)
+// Returns error if data directory exists but has entries without server key (inconsistent state)
 func NewFileStore(dataDir string) (*FileStore, error) {
 	fs := &FileStore{dataDir: dataDir}
 
@@ -62,12 +62,24 @@ func NewFileStore(dataDir string) (*FileStore, error) {
 
 	// Directory exists - check for server key
 	keyPath := filepath.Join(dataDir, serverKeyFile)
-	if _, err := os.Stat(keyPath); err != nil {
-		if os.IsNotExist(err) {
-			// Directory exists but no server key - inconsistent state
-			return nil, errors.New("data directory exists but .server_key is missing (inconsistent state)")
+	_, keyErr := os.Stat(keyPath)
+
+	if os.IsNotExist(keyErr) {
+		// No server key - check if directory has any entry files
+		hasEntries, err := fs.hasEntryFiles()
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan data directory: %w", err)
 		}
-		return nil, fmt.Errorf("failed to check server key: %w", err)
+		if hasEntries {
+			return nil, errors.New("data directory has entries but .server_key is missing (inconsistent state)")
+		}
+		// Empty directory - generate new server key
+		if err := fs.generateServerKey(); err != nil {
+			return nil, fmt.Errorf("failed to generate server key: %w", err)
+		}
+		return fs, nil
+	} else if keyErr != nil {
+		return nil, fmt.Errorf("failed to check server key: %w", keyErr)
 	}
 
 	// Load server key
@@ -76,6 +88,20 @@ func NewFileStore(dataDir string) (*FileStore, error) {
 	}
 
 	return fs, nil
+}
+
+// hasEntryFiles checks if the data directory contains any .json entry files
+func (s *FileStore) hasEntryFiles() (bool, error) {
+	entries, err := os.ReadDir(s.dataDir)
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".json" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Get retrieves an entry by key
