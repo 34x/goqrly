@@ -481,11 +481,11 @@ func handleView(w http.ResponseWriter, r *http.Request) {
 		if password != "" && verifyPassword(entry.Password, password) {
 			// Reset rate limit on success
 			passwordRateLimiter.Reset(clientIP + ":" + key)
-			
+
 			// Decrypt the entry text
 			var decryptedText string
 			if entry.EncryptedData != "" {
-				decrypted, err := entry.DecryptWithKey(password, key)
+				decrypted, err := entry.DecryptWithPassword(password)
 				if err != nil {
 					// Decryption failed - show error
 					lockTmpl.Execute(w, LockData{Key: key, WrongPassword: true, PendingText: text, CSRFToken: csrfToken})
@@ -495,7 +495,7 @@ func handleView(w http.ResponseWriter, r *http.Request) {
 			} else {
 				decryptedText = entry.Text
 			}
-			
+
 			updated := false
 			if text != "" {
 				updateEntry(key, text, password)
@@ -558,8 +558,8 @@ func buildTOTPURI(secret string) string {
 	return fmt.Sprintf("otpauth://totp/goqrly?secret=%s", secret)
 }
 
-// updateEntry updates the text of an existing entry
-// For password-protected entries, encrypts the text with the provided password
+// updateEntry updates the text of an existing entry.
+// For password-protected entries, re-encrypts with a new random salt.
 func updateEntry(key, text, password string) *Entry {
 	entry := store.Get(key)
 	if entry == nil {
@@ -569,13 +569,24 @@ func updateEntry(key, text, password string) *Entry {
 	entry.UpdatedAt = time.Now()
 
 	if entry.Password != "" && password != "" {
-		// Password-protected entry: encrypt the new text
-		encKey := deriveKey(password, key)
+		// Password-protected entry: re-encrypt with new random salt
+		salt, err := generateSalt()
+		if err != nil {
+			// Fallback to unencrypted on error (should not happen)
+			entry.Text = text
+			entry.EncryptedData = ""
+			entry.Salt = ""
+			return entry
+		}
+
+		entry.Salt = base64.StdEncoding.EncodeToString(salt)
+		encKey := deriveKey(password, salt)
 		encrypted, err := encrypt(text, encKey)
 		if err != nil {
 			// Fallback to unencrypted on error
 			entry.Text = text
 			entry.EncryptedData = ""
+			entry.Salt = ""
 		} else {
 			entry.Text = ""
 			entry.EncryptedData = encrypted

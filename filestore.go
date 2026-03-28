@@ -15,27 +15,29 @@ import (
 
 const serverKeyFile = ".server_key"
 
-// FileStore implements Store with file-based persistence
+// FileStore implements Store with file-based persistence.
+// All entries are encrypted at rest using a server key before being written to disk.
 type FileStore struct {
 	mu        sync.RWMutex
 	dataDir   string
-	serverKey []byte // Key for encrypting TOTP secrets
+	serverKey []byte // Key for encrypting all persisted entries
 }
 
-// storedEntry is the JSON representation for disk storage
+// storedEntry is the JSON representation for disk storage.
+// This struct is encrypted with the server key before being written to disk.
 type storedEntry struct {
-	Version      int       `json:"version"`
-	Key          string    `json:"key"`
-	Text         string    `json:"text,omitempty"`
-	EncryptedData string   `json:"encrypted_data,omitempty"`
-	Protected    bool      `json:"protected"`
-	Password     string    `json:"password,omitempty"`
-	TOTPSecret   string    `json:"totp_secret,omitempty"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	Key           string    `json:"key"`
+	Text          string    `json:"text,omitempty"`
+	EncryptedData string    `json:"encrypted_data,omitempty"`
+	Salt          string    `json:"salt,omitempty"`
+	Protected     bool      `json:"protected"`
+	Password      string    `json:"password,omitempty"`
+	TOTPSecret    string    `json:"totp_secret,omitempty"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-// NewFileStore creates a new file-based store
-// Returns error if data directory exists but has entries without server key (inconsistent state)
+// NewFileStore creates a new file-based store with server-key encryption.
+// Returns error if data directory exists but has entries without server key (inconsistent state).
 func NewFileStore(dataDir string) (*FileStore, error) {
 	fs := &FileStore{dataDir: dataDir}
 
@@ -104,7 +106,8 @@ func (s *FileStore) hasEntryFiles() (bool, error) {
 	return false, nil
 }
 
-// Get retrieves an entry by key
+// Get retrieves an entry by key from disk, decrypting with server key.
+// Returns nil if entry doesn't exist or decryption fails.
 func (s *FileStore) Get(key string) *Entry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -112,20 +115,30 @@ func (s *FileStore) Get(key string) *Entry {
 	key = strings.ToLower(key)
 	filePath := filepath.Join(s.dataDir, key+".json")
 
-	data, err := os.ReadFile(filePath)
+	// Read encrypted file
+	encrypted, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil
 	}
 
+	// Decrypt with server key
+	plaintext, err := decryptBytes(string(encrypted), s.serverKey)
+	if err != nil {
+		// Decryption failed - entry may be corrupted or key mismatch
+		return nil
+	}
+
+	// Parse JSON
 	var se storedEntry
-	if err := json.Unmarshal(data, &se); err != nil {
+	if err := json.Unmarshal(plaintext, &se); err != nil {
 		return nil
 	}
 
 	return storedToEntry(&se)
 }
 
-// Put stores an entry
+// Put stores an entry to disk, encrypting with server key.
+// Uses atomic write (temp file + rename) for durability.
 func (s *FileStore) Put(key string, e *Entry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -133,28 +146,36 @@ func (s *FileStore) Put(key string, e *Entry) {
 	key = strings.ToLower(key)
 	filePath := filepath.Join(s.dataDir, key+".json")
 
+	// Convert to stored entry and serialize
 	se := entryToStored(key, e)
-	data, err := json.MarshalIndent(se, "", "  ")
+	jsonData, err := json.MarshalIndent(se, "", "  ")
+	if err != nil {
+		return
+	}
+
+	// Encrypt with server key
+	encrypted, err := encryptBytes(jsonData, s.serverKey)
 	if err != nil {
 		return
 	}
 
 	// Write to temp file first, then rename (atomic)
 	tmpPath := filePath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0640); err != nil {
+	if err := os.WriteFile(tmpPath, []byte(encrypted), 0640); err != nil {
 		return
 	}
 
 	os.Rename(tmpPath, filePath)
 }
 
-// ServerKey returns the server key for TOTP encryption
+// ServerKey returns the server encryption key.
+// Used for encrypting entries before disk storage.
 func (s *FileStore) ServerKey() []byte {
 	return s.serverKey
 }
 
 func (s *FileStore) generateServerKey() error {
-	key := make([]byte, 32)
+	key := make([]byte, serverKeySize)
 	if _, err := rand.Read(key); err != nil {
 		return err
 	}
@@ -162,7 +183,7 @@ func (s *FileStore) generateServerKey() error {
 	keyPath := filepath.Join(s.dataDir, serverKeyFile)
 	data := base64.StdEncoding.EncodeToString(key)
 
-	// Write with restricted permissions
+	// Write with restricted permissions (owner read/write only)
 	if err := os.WriteFile(keyPath, []byte(data), 0600); err != nil {
 		return err
 	}
@@ -183,15 +204,20 @@ func (s *FileStore) loadServerKey() error {
 		return fmt.Errorf("invalid server key format: %w", err)
 	}
 
+	if len(key) != serverKeySize {
+		return fmt.Errorf("server key must be %d bytes, got %d", serverKeySize, len(key))
+	}
+
 	s.serverKey = key
 	return nil
 }
 
-// storedToEntry converts a stored entry to an in-memory entry
+// storedToEntry converts a stored entry to an in-memory entry.
 func storedToEntry(se *storedEntry) *Entry {
 	return &Entry{
 		Text:          se.Text,
 		EncryptedData: se.EncryptedData,
+		Salt:          se.Salt,
 		Protected:     se.Protected,
 		Password:      se.Password,
 		TOTPSecret:    se.TOTPSecret,
@@ -199,16 +225,16 @@ func storedToEntry(se *storedEntry) *Entry {
 	}
 }
 
-// entryToStored converts an in-memory entry to a stored entry
+// entryToStored converts an in-memory entry to a stored entry.
 func entryToStored(key string, e *Entry) *storedEntry {
 	return &storedEntry{
-		Version:      1,
-		Key:          key,
-		Text:         e.Text,
+		Key:           key,
+		Text:          e.Text,
 		EncryptedData: e.EncryptedData,
-		Protected:    e.Protected,
-		Password:     e.Password,
-		TOTPSecret:   e.TOTPSecret,
-		UpdatedAt:    e.UpdatedAt,
+		Salt:          e.Salt,
+		Protected:     e.Protected,
+		Password:      e.Password,
+		TOTPSecret:    e.TOTPSecret,
+		UpdatedAt:     e.UpdatedAt,
 	}
 }

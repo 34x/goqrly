@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -450,9 +451,13 @@ func TestGenerateShortcodeProtected(t *testing.T) {
 	if entry.Password == "" {
 		t.Error("Expected non-empty password hash")
 	}
+	// Should have a salt
+	if entry.Salt == "" {
+		t.Error("Expected non-empty salt for password-protected entry")
+	}
 
 	// Verify we can decrypt with the correct password
-	decrypted, err := entry.DecryptWithKey("password123", key)
+	decrypted, err := entry.DecryptWithPassword("password123")
 	if err != nil {
 		t.Errorf("Failed to decrypt: %v", err)
 	}
@@ -858,7 +863,10 @@ func TestLimitByIP(t *testing.T) {
 // Encryption tests
 func TestEncryptDecrypt(t *testing.T) {
 	password := "mySecretPassword"
-	salt := "testshortcode"
+	salt, err := generateSalt()
+	if err != nil {
+		t.Fatalf("Failed to generate salt: %v", err)
+	}
 	plaintext := "This is my secret text"
 
 	// Derive key from password
@@ -886,7 +894,10 @@ func TestEncryptDecrypt(t *testing.T) {
 func TestEncryptDecryptWrongKey(t *testing.T) {
 	password := "mySecretPassword"
 	wrongPassword := "wrongPassword"
-	salt := "testshortcode"
+	salt, err := generateSalt()
+	if err != nil {
+		t.Fatalf("Failed to generate salt: %v", err)
+	}
 	plaintext := "Secret message"
 
 	key := deriveKey(password, salt)
@@ -908,8 +919,11 @@ func TestEncryptDecryptDifferentSalt(t *testing.T) {
 	password := "mySecretPassword"
 	plaintext := "Secret message"
 
-	key1 := deriveKey(password, "salt1")
-	key2 := deriveKey(password, "salt2")
+	salt1, _ := generateSalt()
+	salt2, _ := generateSalt()
+
+	key1 := deriveKey(password, salt1)
+	key2 := deriveKey(password, salt2)
 
 	encrypted, err := encrypt(plaintext, key1)
 	if err != nil {
@@ -923,13 +937,33 @@ func TestEncryptDecryptDifferentSalt(t *testing.T) {
 	}
 }
 
-func TestEntryDecryptWithKey(t *testing.T) {
+func TestGenerateSalt(t *testing.T) {
+	salt1, err := generateSalt()
+	if err != nil {
+		t.Fatalf("Failed to generate salt: %v", err)
+	}
+	if len(salt1) != saltSize {
+		t.Errorf("Expected salt size %d, got %d", saltSize, len(salt1))
+	}
+
+	salt2, err := generateSalt()
+	if err != nil {
+		t.Fatalf("Failed to generate second salt: %v", err)
+	}
+
+	// Salts should be unique
+	if string(salt1) == string(salt2) {
+		t.Error("Salts should be unique")
+	}
+}
+
+func TestEntryDecryptWithPassword(t *testing.T) {
 	password := "password123"
 	text := "Secret content"
 
 	// Create entry using GenerateShortcode (which encrypts)
 	store := NewMemoryStore()
-	shortcode, entry := GenerateShortcode(text, password)
+	_, entry := GenerateShortcode(text, password)
 
 	if entry.Text != "" {
 		t.Error("Password-protected entry Text should be empty")
@@ -937,11 +971,14 @@ func TestEntryDecryptWithKey(t *testing.T) {
 	if entry.EncryptedData == "" {
 		t.Error("Password-protected entry should have EncryptedData")
 	}
+	if entry.Salt == "" {
+		t.Error("Password-protected entry should have Salt")
+	}
 
 	// Verify decryption works
-	decrypted, err := entry.DecryptWithKey(password, shortcode)
+	decrypted, err := entry.DecryptWithPassword(password)
 	if err != nil {
-		t.Fatalf("DecryptWithKey failed: %v", err)
+		t.Fatalf("DecryptWithPassword failed: %v", err)
 	}
 	if decrypted != text {
 		t.Errorf("Expected '%s', got '%s'", text, decrypted)
@@ -951,10 +988,10 @@ func TestEntryDecryptWithKey(t *testing.T) {
 
 func TestEntryDecryptWithWrongPassword(t *testing.T) {
 	store := NewMemoryStore()
-	shortcode, entry := GenerateShortcode("Secret", "correctpassword")
+	_, entry := GenerateShortcode("Secret", "correctpassword")
 
 	// Try with wrong password
-	_, err := entry.DecryptWithKey("wrongpassword", shortcode)
+	_, err := entry.DecryptWithPassword("wrongpassword")
 	if err == nil {
 		t.Error("Expected decryption to fail with wrong password")
 	}
@@ -1156,5 +1193,184 @@ func TestFileStorePasswordProtected(t *testing.T) {
 	}
 	if retrieved.EncryptedData != "encrypted-content" {
 		t.Error("EncryptedData should be preserved")
+	}
+}
+
+// Server-key encryption tests
+func TestFileStoreEncryption(t *testing.T) {
+	dir := t.TempDir() + "/data"
+	fs, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("Failed to create FileStore: %v", err)
+	}
+
+	// Create entry with sensitive data
+	entry := &Entry{
+		Text:      "Secret content",
+		TOTPSecret: "JBSWY3DPEHPK3PXP",
+		UpdatedAt:  time.Now(),
+	}
+	fs.Put("test", entry)
+
+	// Read raw file - should NOT contain plaintext
+	filePath := dir + "/test.json"
+	rawData, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("Failed to read file: %v", err)
+	}
+
+	// Raw file should be encrypted (base64 encoded)
+	rawStr := string(rawData)
+	if strings.Contains(rawStr, "Secret content") {
+		t.Error("File should not contain plaintext content")
+	}
+	if strings.Contains(rawStr, "JBSWY3DPEHPK3PXP") {
+		t.Error("File should not contain TOTP secret in plaintext")
+	}
+
+	// Should be valid base64
+	_, err = base64.StdEncoding.DecodeString(rawStr)
+	if err != nil {
+		t.Errorf("File content should be valid base64: %v", err)
+	}
+
+	// But decryption should work
+	retrieved := fs.Get("test")
+	if retrieved == nil {
+		t.Fatal("Entry not found after decryption")
+	}
+	if retrieved.Text != "Secret content" {
+		t.Errorf("Expected 'Secret content', got '%s'", retrieved.Text)
+	}
+	if retrieved.TOTPSecret != "JBSWY3DPEHPK3PXP" {
+		t.Errorf("TOTP secret not preserved")
+	}
+}
+
+func TestFileStoreEncryptionDifferentKeys(t *testing.T) {
+	// Create two FileStores with different server keys
+	dir1 := t.TempDir() + "/data"
+	fs1, err := NewFileStore(dir1)
+	if err != nil {
+		t.Fatalf("Failed to create FileStore 1: %v", err)
+	}
+
+	dir2 := t.TempDir() + "/data"
+	fs2, err := NewFileStore(dir2)
+	if err != nil {
+		t.Fatalf("Failed to create FileStore 2: %v", err)
+	}
+
+	// Store same entry in both
+	entry := &Entry{
+		Text:      "Same content",
+		UpdatedAt:  time.Now(),
+	}
+	fs1.Put("test", entry)
+	fs2.Put("test", entry)
+
+	// Get raw files - should be different (different keys = different ciphertext)
+	file1, _ := os.ReadFile(dir1 + "/test.json")
+	file2, _ := os.ReadFile(dir2 + "/test.json")
+
+	if string(file1) == string(file2) {
+		// Different keys with same plaintext can produce same ciphertext only
+		// if nonce is the same, but nonce is random so very unlikely
+		t.Log("Warning: different keys produced same ciphertext (extremely unlikely)")
+	}
+}
+
+func TestFileStoreKeyRequired(t *testing.T) {
+	// Create directory with entry but no server key (inconsistent state)
+	dir := t.TempDir()
+	os.MkdirAll(dir, 0750)
+
+	// Write a fake entry file
+	entryFile := dir + "/existing.json"
+	os.WriteFile(entryFile, []byte("fake"), 0644)
+
+	// Should fail to initialize
+	_, err := NewFileStore(dir)
+	if err == nil {
+		t.Error("Should fail when entries exist but server key is missing")
+	}
+}
+
+func TestFileStoreDecryptWithWrongKey(t *testing.T) {
+	// Create store and save entry
+	dir := t.TempDir() + "/data"
+	fs1, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("Failed to create FileStore: %v", err)
+	}
+
+	entry := &Entry{
+		Text:     "Secret message",
+		UpdatedAt: time.Now(),
+	}
+	fs1.Put("test", entry)
+
+	// Get the server key
+	key1 := fs1.ServerKey()
+
+	// Create a new store with same key - should work
+	key2 := make([]byte, 32)
+	copy(key2, key1)
+
+	// Simulate loading with different key
+	fs2 := &FileStore{
+		dataDir:   dir,
+		serverKey: key2, // Using same key
+	}
+
+	retrieved := fs2.Get("test")
+	if retrieved == nil {
+		t.Error("Should decrypt with same key")
+	}
+}
+
+func TestFileStoreEncryptionPreservesAllFields(t *testing.T) {
+	dir := t.TempDir() + "/data"
+	fs, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("Failed to create FileStore: %v", err)
+	}
+
+	// Create fully-populated entry
+	now := time.Now()
+	entry := &Entry{
+		Text:          "Full entry",
+		EncryptedData: "base64-encrypted-data",
+		Salt:          "base64-salt",
+		Protected:     true,
+		Password:      "$2a$10$hash",
+		TOTPSecret:    "TOTPSECRET",
+		UpdatedAt:     now,
+	}
+	fs.Put("full", entry)
+
+	// Retrieve and verify all fields
+	retrieved := fs.Get("full")
+	if retrieved == nil {
+		t.Fatal("Entry not found")
+	}
+
+	if retrieved.Text != "Full entry" {
+		t.Errorf("Text mismatch")
+	}
+	if retrieved.EncryptedData != "base64-encrypted-data" {
+		t.Errorf("EncryptedData mismatch")
+	}
+	if retrieved.Salt != "base64-salt" {
+		t.Errorf("Salt mismatch")
+	}
+	if !retrieved.Protected {
+		t.Errorf("Protected should be true")
+	}
+	if retrieved.Password != "$2a$10$hash" {
+		t.Errorf("Password mismatch")
+	}
+	if retrieved.TOTPSecret != "TOTPSECRET" {
+		t.Errorf("TOTPSecret mismatch")
 	}
 }

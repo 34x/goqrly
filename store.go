@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/base32"
 	"encoding/base64"
+	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -17,47 +19,37 @@ import (
 const minLen = 3
 const maxLen = 6
 
+// Sentinel errors for entry operations
+var errMissingSalt = errors.New("missing salt for encrypted entry")
+
 // Entry represents a QR code entry
 type Entry struct {
 	Text          string    // Decrypted text (populated only for public entries or after decryption)
 	EncryptedData string    // Base64-encoded (nonce + ciphertext), empty if not protected
+	Salt          string    // Base64-encoded random salt for key derivation (required for password-protected)
 	Protected     bool      // True if password or TOTP protected
 	Password      string    // bcrypt hash, empty if no password
 	TOTPSecret    string    // base32 secret, empty if not TOTP
 	UpdatedAt     time.Time
 }
 
-// Decrypt attempts to decrypt the entry text using the provided password.
-// Returns the decrypted text and true if successful, or empty string and false on failure.
-// For non-password-protected entries, returns Text and true.
-func (e *Entry) Decrypt(password string) (string, bool) {
-	if !e.Protected || e.Password == "" {
-		// Not password-protected, return text directly
-		return e.Text, true
-	}
-
-	if e.EncryptedData == "" {
-		// Legacy entry without encryption (shouldn't happen)
-		return e.Text, true
-	}
-
-	if password == "" {
-		return "", false
-	}
-
-	// Need to derive key, but we need the shortcode as salt
-	// This is called from handlers where we have access to the key
-	return "", false
-}
-
-// DecryptWithKey decrypts the entry text using password and shortcode (used as salt).
-// Returns decrypted text or error.
-func (e *Entry) DecryptWithKey(password, shortcode string) (string, error) {
+// DecryptWithPassword decrypts the entry text using the provided password.
+// Requires the stored Salt field to be populated for password-protected entries.
+func (e *Entry) DecryptWithPassword(password string) (string, error) {
 	if e.EncryptedData == "" {
 		return e.Text, nil
 	}
 
-	key := deriveKey(password, shortcode)
+	if e.Salt == "" {
+		return "", errMissingSalt
+	}
+
+	salt, err := base64.StdEncoding.DecodeString(e.Salt)
+	if err != nil {
+		return "", fmt.Errorf("invalid salt format: %w", err)
+	}
+
+	key := deriveKey(password, salt)
 	return decrypt(e.EncryptedData, key)
 }
 
@@ -150,18 +142,35 @@ func GenerateShortcode(text, password string) (string, *Entry) {
 	}
 }
 
-// createEntry creates and stores a new entry
+// createEntry creates and stores a new entry with proper encryption for password-protected entries.
+// Password-protected entries use a per-entry random salt for key derivation.
 func createEntry(key, text, password string) (string, *Entry) {
-	entry := &Entry{Protected: password != "", UpdatedAt: time.Now()}
+	entry := &Entry{
+		Protected: password != "",
+		UpdatedAt: time.Now(),
+	}
 
 	if password != "" {
 		entry.Password = hashPassword(password)
-		// Encrypt text with key derived from password + shortcode
-		encKey := deriveKey(password, key)
+
+		// Generate a cryptographically secure random salt (16 bytes = 128 bits)
+		salt, err := generateSalt()
+		if err != nil {
+			// This should never happen with crypto/rand, but handle gracefully
+			entry.Text = text
+			store.Put(key, entry)
+			return key, entry
+		}
+
+		entry.Salt = base64.StdEncoding.EncodeToString(salt)
+
+		// Derive encryption key from password + random salt
+		encKey := deriveKey(password, salt)
 		encrypted, err := encrypt(text, encKey)
 		if err != nil {
 			// Fallback to unencrypted on error (should not happen)
 			entry.Text = text
+			entry.Salt = ""
 		} else {
 			entry.EncryptedData = encrypted
 		}
@@ -173,7 +182,7 @@ func createEntry(key, text, password string) (string, *Entry) {
 	return key, entry
 }
 
-// isSameEntry checks if an existing entry matches the new text and password
+// isSameEntry checks if an existing entry matches the new text and password.
 func isSameEntry(existing *Entry, key, text, password string) bool {
 	if existing == nil {
 		return false
@@ -186,14 +195,13 @@ func isSameEntry(existing *Entry, key, text, password string) bool {
 		}
 		// Password matches - decrypt and compare text
 		if existing.EncryptedData != "" {
-			encKey := deriveKey(password, key)
-			decrypted, err := decrypt(existing.EncryptedData, encKey)
+			decrypted, err := existing.DecryptWithPassword(password)
 			if err != nil {
 				return false
 			}
 			return decrypted == text
 		}
-		// Legacy unencrypted entry
+		// Unencrypted password-protected entry (shouldn't happen)
 		return existing.Text == text
 	}
 
@@ -230,19 +238,36 @@ func generateKey(data string, length, salt int) string {
 func generateRandomKey(length int) string {
 	chars := "abcdefghijklmnopqrstuvwxyz0123456789"
 	result := make([]byte, length)
-	rand.Read(result)
 	for i := range result {
-		result[i] = chars[int(result[i])%len(chars)]
+		// Use rejection sampling to avoid bias from modulo
+		for {
+			b := make([]byte, 1)
+			rand.Read(b)
+			idx := int(b[0])
+			if idx < (256 / len(chars) * len(chars)) {
+				result[i] = chars[idx%len(chars)]
+				break
+			}
+		}
 	}
 	return string(result)
 }
 
+// generateRandomBase32 generates a random base32-encoded string of given length
 func generateRandomBase32(length int) string {
 	chars := "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 	result := make([]byte, length)
-	rand.Read(result)
 	for i := range result {
-		result[i] = chars[int(result[i])%len(chars)]
+		// Use rejection sampling to avoid bias from modulo
+		for {
+			b := make([]byte, 1)
+			rand.Read(b)
+			idx := int(b[0])
+			if idx < (256 / len(chars) * len(chars)) {
+				result[i] = chars[idx%len(chars)]
+				break
+			}
+		}
 	}
 	return string(result)
 }

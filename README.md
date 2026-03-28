@@ -155,6 +155,39 @@ cd goqrly
 go build -ldflags="-s -w" -o goqrly .
 ```
 
+## Security
+
+### Password-Protected Entries
+
+Passwords are hashed with bcrypt. Content is encrypted with AES-256-GCM using a key derived from the password via Argon2id (per-entry random salt).
+
+### File Storage Encryption
+
+When using `--data-dir`, all entries are encrypted at rest with AES-256-GCM using a server key stored in `.server_key`:
+
+```
+data/
+├── .server_key    # 32-byte key (base64)
+├── abc123.json    # Encrypted entry
+└── xyz789.json    # Encrypted entry
+```
+
+**Important:** The server key is stored alongside the encrypted data. This provides:
+- Obfuscation against casual inspection
+- Protection against accidental log/backup inclusion
+- Compliance with "encrypted at rest" requirements
+
+**This does NOT protect against:**
+- Attackers with filesystem access (key is in the same directory)
+- Disk theft (key is on the same disk)
+- Backup exposure (key is in the backup)
+
+For stronger security, consider running in memory-only mode (default) or storing `.server_key` separately with restricted permissions.
+
+### In-Memory Mode (Default)
+
+Without `--data-dir`, all data exists only in RAM and is lost on restart. No persistent attack surface.
+
 ## Tests
 
 ```bash
