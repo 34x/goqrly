@@ -153,33 +153,11 @@ For production with automatic Let's Encrypt SSL, run goqrly behind Caddy:
 
 **1. Install goqrly:**
 ```bash
-sudo curl -sSL https://github.com/34x/goqrly/releases/latest/download/goqrly_linux_amd64.tar.gz | tar -xz
-sudo mv goqrly_linux_amd64 /usr/local/bin/goqrly
-sudo chmod +x /usr/local/bin/goqrly
-sudo mkdir -p /var/lib/goqrly
+curl -sSL https://github.com/34x/goqrly/releases/latest/download/goqrly_linux_amd64.tar.gz | tar -xz
+sudo ./goqrly_linux_amd64 install --port 8080 --data-dir /var/lib/goqrly
 ```
 
-**2. Create systemd service:**
-```bash
-sudo tee /etc/systemd/system/goqrly.service <<EOF
-[Unit]
-Description=goqrly QR Code Generator
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/goqrly --port 8080 --data-dir /var/lib/goqrly
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now goqrly
-```
-
-**3. Install Caddy:**
+**2. Install Caddy:**
 ```bash
 sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
 curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
@@ -187,7 +165,7 @@ curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo 
 sudo apt update && sudo apt install -y caddy
 ```
 
-**4. Configure Caddy:**
+**3. Configure Caddy:**
 ```bash
 sudo tee /etc/caddy/Caddyfile <<EOF
 example.com {
@@ -198,7 +176,7 @@ EOF
 
 Replace `example.com` with your domain. Ensure DNS points to your server.
 
-**5. Open firewall and restart:**
+**4. Open firewall and restart:**
 ```bash
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
@@ -206,11 +184,6 @@ sudo systemctl restart caddy
 ```
 
 Caddy will automatically obtain and renew Let's Encrypt certificates.
-
-**Result:**
-- `http://example.com` → redirects to HTTPS
-- `https://example.com` → goqrly with valid SSL certificate
-- Data persisted in `/var/lib/goqrly/` (encrypted at rest)
 
 ## Build from Source
 
