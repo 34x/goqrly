@@ -185,6 +185,19 @@ sudo systemctl restart caddy
 
 Caddy will automatically obtain and renew Let's Encrypt certificates.
 
+## Upgrade
+
+Replace binary and restart:
+
+```bash
+sudo systemctl stop goqrly && \
+curl -sSL https://github.com/34x/goqrly/releases/latest/download/goqrly_linux_amd64.tar.gz | tar -xz && \
+sudo mv goqrly_linux_amd64 /usr/local/bin/goqrly && \
+sudo systemctl start goqrly
+```
+
+Data in `--data-dir` is preserved across upgrades.
+
 ## Build from Source
 
 ```bash
