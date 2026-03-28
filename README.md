@@ -191,8 +191,20 @@ Without `--data-dir`, all data exists only in RAM and is lost on restart. No per
 ## Tests
 
 ```bash
-go test       # Unit tests
-./test.sh     # Integration tests
+make test     # Build + run all tests (recommended)
+make unit-test    # Unit tests only
+./test.sh         # Run tests directly (builds first)
+```
+
+## Development
+
+```bash
+make build    # Build binary
+make test     # Run all tests
+make lint     # Format + vet
+make run      # Build and run locally
+make clean    # Remove artifacts
+make help     # Show all targets
 ```
 
 ## License

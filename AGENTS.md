@@ -313,6 +313,17 @@ Result: ~8MB static binary, no runtime dependencies.
 
 ## Tests
 ```bash
-go test           # Unit tests (handlers, store, encryption, TOTP)
-./test.sh         # Integration tests (curl-based)
+make test          # Build + run all tests (recommended)
+make unit-test     # Unit tests only
+./test.sh          # Run tests directly (builds first)
+```
+
+## Development
+```bash
+make build         # Build binary
+make test          # Run tests
+make lint          # Format + vet
+make run           # Build and run locally
+make clean         # Remove artifacts
+make help          # Show all targets
 ```
