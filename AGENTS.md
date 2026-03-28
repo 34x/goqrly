@@ -272,16 +272,16 @@ type Entry struct {
 ├── integration_test.go # Integration tests
 ├── test.sh             # Shell-based curl tests
 ├── go.mod
-├── go.go               # Go package metadata
 ├── go.sum
 ├── README.md
 └── AGENTS.md
 ```
 
 ### Firewall
-- Try `ufw allow <port>/tcp` first
-- Fallback to `firewall-cmd` (firewalld)
-- If neither available, print manual command
+- Not automatically configured by goqrly
+- After install, users are prompted to open port manually:
+  - `sudo ufw allow <port>/tcp` (ufw)
+  - `sudo firewall-cmd --permanent --add-port=<port>/tcp && sudo firewall-cmd --reload` (firewalld)
 
 ### IP Detection
 - 1 second timeout

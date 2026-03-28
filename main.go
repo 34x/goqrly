@@ -117,9 +117,6 @@ func main() {
 
 	port := cfg.Port
 
-	// Setup firewall (only if running as root)
-	setupFirewall(port)
-
 	addr := fmt.Sprintf(":%d", port)
 	mux := setupMux()
 
@@ -198,14 +195,6 @@ Examples:
   sudo goqrly install --port 8080     # Install without TLS on port 8080
   sudo goqrly uninstall               # Remove service, keep certs and binary
   sudo goqrly uninstall --remove-binary  # Remove everything`)
-}
-
-func setupFirewall(port int) {
-	if os.Getuid() != 0 {
-		return
-	}
-	cmd := exec.Command("ufw", "allow", fmt.Sprintf("%d/tcp", port))
-	cmd.Run()
 }
 
 func installService(cfg Config) {
@@ -344,9 +333,6 @@ WantedBy=multi-user.target
 	cmd = exec.Command("systemctl", "enable", "--now", "goqrly")
 	cmd.Run()
 
-	// Try to open firewall
-	openFirewall(installCfg.Port)
-
 	// Print result
 	proto := "http"
 	if useTLS {
@@ -360,6 +346,11 @@ WantedBy=multi-user.target
 	}
 	fmt.Println()
 	fmt.Println("Manage service: sudo systemctl status goqrly")
+	fmt.Println()
+	fmt.Println("⚠ If using a firewall, open the port:")
+	fmt.Println("   sudo ufw allow " + portStr + "/tcp")
+	fmt.Println("   # or")
+	fmt.Println("   sudo firewall-cmd --permanent --add-port=" + portStr + "/tcp && sudo firewall-cmd --reload")
 }
 
 func generateSelfSignedCert() (certPEM, keyPEM string, err error) {
@@ -479,39 +470,6 @@ func isPublicIP(ip string) bool {
 		return false
 	}
 	return true
-}
-
-func openFirewall(port int) {
-	portStr := strconv.Itoa(port)
-
-	// Try ufw
-	cmd := exec.Command("ufw", "status")
-	if err := cmd.Run(); err == nil {
-		cmd = exec.Command("ufw", "allow", portStr+"/tcp")
-		if err := cmd.Run(); err == nil {
-			fmt.Println("Firewall: port " + portStr + " opened")
-			return
-		}
-	}
-
-	// Try firewalld
-	cmd = exec.Command("firewall-cmd", "--state")
-	if err := cmd.Run(); err == nil {
-		cmd = exec.Command("firewall-cmd", "--permanent", "--add-port="+portStr+"/tcp")
-		cmd.Run()
-		cmd = exec.Command("firewall-cmd", "--reload")
-		if err := cmd.Run(); err == nil {
-			fmt.Println("Firewall: port " + portStr + " opened (firewalld)")
-			return
-		}
-	}
-
-	// No firewall tool available
-	fmt.Println()
-	fmt.Println("⚠ Firewall: please open port manually:")
-	fmt.Println("   sudo ufw allow " + portStr + "/tcp")
-	fmt.Println("   # or")
-	fmt.Println("   sudo firewall-cmd --permanent --add-port=" + portStr + "/tcp && sudo firewall-cmd --reload")
 }
 
 func uninstallService() {
