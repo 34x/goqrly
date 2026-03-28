@@ -7,6 +7,11 @@ BASE=""
 PID_FILE="/tmp/goqrly.pid"
 EXTERNAL_SERVER=0
 
+# Build the binary before testing
+echo "Building goqrly..."
+go build -ldflags="-s -w" -o goqrly . || { echo "Build failed!"; exit 1; }
+echo ""
+
 # Cleanup function
 cleanup() {
     if [ "$EXTERNAL_SERVER" = "0" ] && [ -f "$PID_FILE" ]; then
