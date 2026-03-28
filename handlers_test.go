@@ -1129,9 +1129,10 @@ func TestFileStoreExistingDirectoryEmptyNoKey(t *testing.T) {
 
 func TestFileStoreExistingDirectoryWithKey(t *testing.T) {
 	dir := t.TempDir()
-	// Create directory with server key
+	// Create directory with server key (32 bytes, base64 encoded)
 	os.MkdirAll(dir, 0750)
-	os.WriteFile(dir+"/"+serverKeyFile, []byte("dGhpcyBpcyBhIHRlc3Qga2V5"), 0600)
+	// 32 bytes of zeros, base64 encoded = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+	os.WriteFile(dir+"/"+serverKeyFile, []byte("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="), 0600)
 
 	fs, err := NewFileStore(dir)
 	if err != nil {
