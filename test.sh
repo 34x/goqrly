@@ -4,7 +4,6 @@ set -e
 FIRST_PORT=8080
 LAST_PORT=8090
 BASE=""
-COOKIE_JAR="/tmp/goqrly_cookies.txt"
 PID_FILE="/tmp/goqrly.pid"
 EXTERNAL_SERVER=0
 
@@ -183,3 +182,163 @@ fi
 
 echo ""
 echo "=== All tests passed! ==="
+
+# ====================================
+# Extended Tests: Persistent Storage
+# ====================================
+
+echo ""
+echo "=== Extended Tests ==="
+
+# Find or start server for extended tests
+PORT=${PORT:-8080}
+BASE="http://localhost:$PORT"
+
+# Test 9: Persistent storage - create entry
+echo -n "Test 9: Persistent storage create... "
+DATA_DIR="./tmp_test_data"
+rm -rf "$DATA_DIR" 2>/dev/null || true
+
+# Start persistent server
+PERSIST_PORT=8091
+./goqrly --port $PERSIST_PORT --data-dir "$DATA_DIR" &
+PERSIST_PID=$!
+sleep 2
+
+# Create entry
+HOMEPAGE=$(curl -s "http://localhost:$PERSIST_PORT")
+CSRF_TOKEN=$(extract_csrf "$HOMEPAGE")
+PUB_KEY=$(curl -s -X POST -d "text=PersistentTest&csrf_token=$CSRF_TOKEN" "http://localhost:$PERSIST_PORT/generate" -D - -o /dev/null | grep -i "^Location:" | tr -d '\r' | awk '{print $2}')
+
+if [ -n "$PUB_KEY" ]; then
+    echo "✓ (key: $PUB_KEY)"
+else
+    echo "✗"
+    kill $PERSIST_PID 2>/dev/null || true
+    exit 1
+fi
+
+# Test 10: Persistent storage - verify file is encrypted
+echo -n "Test 10: File is encrypted (not plaintext)... "
+if grep -q "PersistentTest" "$DATA_DIR/$(echo $PUB_KEY | sed 's|/||').json" 2>/dev/null; then
+    echo "✗ (plaintext found in file)"
+    kill $PERSIST_PID 2>/dev/null || true
+    exit 1
+else
+    echo "✓"
+fi
+
+# Test 11: Persistent storage - retrieve entry
+echo -n "Test 11: Persistent storage retrieve... "
+if curl -s "http://localhost:$PERSIST_PORT$PUB_KEY" | grep -q "PersistentTest"; then
+    echo "✓"
+else
+    echo "✗"
+    kill $PERSIST_PID 2>/dev/null || true
+    exit 1
+fi
+
+# Test 12: Persistent storage - password-protected entry
+echo -n "Test 12: Persistent protected entry... "
+HOMEPAGE=$(curl -s "http://localhost:$PERSIST_PORT")
+CSRF_TOKEN=$(extract_csrf "$HOMEPAGE")
+PROT_KEY=$(curl -s -X POST -d "text=SecretPersistent&password=testpass&csrf_token=$CSRF_TOKEN" "http://localhost:$PERSIST_PORT/generate" -D - -o /dev/null | grep -i "^Location:" | tr -d '\r' | awk '{print $2}')
+
+if [ -n "$PROT_KEY" ]; then
+    echo "✓ (key: $PROT_KEY)"
+else
+    echo "✗"
+    kill $PERSIST_PID 2>/dev/null || true
+    exit 1
+fi
+
+# Test 13: Persistent storage - protected file encrypted
+echo -n "Test 13: Protected file encrypted... "
+if grep -q "SecretPersistent" "$DATA_DIR/$(echo $PROT_KEY | sed 's|/||').json" 2>/dev/null; then
+    echo "✗ (plaintext found in file)"
+    kill $PERSIST_PID 2>/dev/null || true
+    exit 1
+else
+    echo "✓"
+fi
+
+# Test 14: Persistent storage - unlock with password
+echo -n "Test 14: Protected entry unlock... "
+CSRF_TOKEN=$(get_csrf "http://localhost:$PERSIST_PORT$PROT_KEY")
+if curl -s -X POST -d "password=testpass&csrf_token=$CSRF_TOKEN" "http://localhost:$PERSIST_PORT$PROT_KEY" | grep -q "SecretPersistent"; then
+    echo "✓"
+else
+    echo "✗"
+    kill $PERSIST_PID 2>/dev/null || true
+    exit 1
+fi
+
+# Test 15: Server key exists
+echo -n "Test 15: Server key file exists... "
+if [ -f "$DATA_DIR/.server_key" ]; then
+    KEY_SIZE=$(cat "$DATA_DIR/.server_key" | base64 -d | wc -c)
+    if [ "$KEY_SIZE" -eq 32 ]; then
+        echo "✓ (32 bytes)"
+    else
+        echo "✗ (wrong size: $KEY_SIZE)"
+        kill $PERSIST_PID 2>/dev/null || true
+        exit 1
+    fi
+else
+    echo "✗ (key file missing)"
+    kill $PERSIST_PID 2>/dev/null || true
+    exit 1
+fi
+
+# Stop persistent server
+kill $PERSIST_PID 2>/dev/null || true
+sleep 1
+
+# Test 16: Persistent storage - restart and verify
+echo -n "Test 16: Restart and verify persistence... "
+./goqrly --port $PERSIST_PORT --data-dir "$DATA_DIR" &
+PERSIST_PID=$!
+sleep 2
+
+# Verify public entry still exists
+if curl -s "http://localhost:$PERSIST_PORT$PUB_KEY" | grep -q "PersistentTest"; then
+    :
+else
+    echo "✗ (public entry missing)"
+    kill $PERSIST_PID 2>/dev/null || true
+    exit 1
+fi
+
+# Verify protected entry still exists
+CSRF_TOKEN=$(get_csrf "http://localhost:$PERSIST_PORT$PROT_KEY")
+if curl -s -X POST -d "password=testpass&csrf_token=$CSRF_TOKEN" "http://localhost:$PERSIST_PORT$PROT_KEY" | grep -q "SecretPersistent"; then
+    echo "✓"
+else
+    echo "✗ (protected entry missing)"
+    kill $PERSIST_PID 2>/dev/null || true
+    exit 1
+fi
+
+# Stop persistent server
+kill $PERSIST_PID 2>/dev/null || true
+
+# Test 17: Missing server key fails
+echo -n "Test 17: Missing server key detected... "
+rm "$DATA_DIR/.server_key"
+./goqrly --port $PERSIST_PORT --data-dir "$DATA_DIR" 2>&1 &
+FAIL_PID=$!
+sleep 1
+
+if ps -p $FAIL_PID > /dev/null 2>&1; then
+    echo "✗ (server should fail)"
+    kill $FAIL_PID 2>/dev/null || true
+    exit 1
+else
+    echo "✓ (server correctly exited)"
+fi
+
+# Cleanup
+rm -rf "$DATA_DIR" 2>/dev/null || true
+
+echo ""
+echo "=== All extended tests passed! ==="
