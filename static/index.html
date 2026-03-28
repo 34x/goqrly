@@ -7,11 +7,16 @@
     <style>
         body { font-family: system-ui, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
         h1 { text-align: center; }
-        textarea { width: 100%; padding: 12px; font-size: 16px; box-sizing: border-box; min-height: 100px; resize: vertical; font-family: inherit; }
+        textarea { width: 100%; padding: 12px; font-size: 16px; box-sizing: border-box; min-height: 20ex; resize: vertical; font-family: inherit; }
         input { width: 100%; padding: 12px; font-size: 16px; box-sizing: border-box; }
         input[type="password"] { margin-top: 8px; }
         button { width: 100%; padding: 12px; font-size: 16px; margin-top: 10px; background: #007bff; color: white; border: none; cursor: pointer; }
         button:hover { background: #0056b3; }
+        .hint { font-size: 13px; color: #666; margin-top: 4px; margin-bottom: 16px; }
+        .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; }
+        .disclaimer { font-size: 13px; color: #666; margin: 4px 0; }
+        .credit { font-size: 13px; color: #999; margin: 12px 0 0 0; }
+        .credit a { color: #666; }
         .password-toggle { display: flex; align-items: center; margin-top: 4px; }
         .password-toggle label { font-size: 12px; color: #666; cursor: pointer; }
         .form-row { display: flex; gap: 8px; margin-top: 8px; }
@@ -40,12 +45,20 @@
     <form action="/generate" method="POST">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <textarea name="text" placeholder="Enter text, URL, or markdown..." autofocus required></textarea>
+        <div class="hint">Write text or markdown to share.</div>
         <div class="form-row">
             <input type="password" name="password" placeholder="Password (optional)">
             <label class="totp-option"><input type="checkbox" name="totp"> TOTP</label>
         </div>
-        <button type="submit">Generate</button>
+        <div class="hint">Restrict access with a password.</div>
+        <button type="submit">Save</button>
     </form>
+
+    <div class="footer">
+        <p class="disclaimer">Beta software – use at your own risk. Report bugs on GitHub.</p>
+        <p class="disclaimer">Don't share sensitive data online.</p>
+        <p class="credit">Made by minimax2.7 and GLM-5 with ❤️ in <a href="https://pi.dev" target="_blank">pi.dev</a>.</p>
+    </div>
 
     {{if .ShowRecentList}}
     <div class="recent">
